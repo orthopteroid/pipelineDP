@@ -9,6 +9,9 @@
 #include <limits>
 #include <valarray>
 
+struct StripInfo { float x, y, z; int rc, lt, tt; int ps, pe; };
+using InputStrip = std::vector<StripInfo>;
+
 using Node = uint16_t;
 using Edge = std::pair<Node, Node>;
 
@@ -22,8 +25,8 @@ struct NodeAndCost { Node node; float path_cost; };
 const NodeAndCost nacMAX = {std::numeric_limits<uint16_t>::max(), std::numeric_limits<float>::max()};
 const NodeAndCost nacZERO = {std::numeric_limits<uint16_t>::max(), 0};
 
+enum : int {NoLand = 0, Water, Swamp, Rock, Soil};
 enum : int {NoTrees = 0, SmallTrees, LargeTrees};
-enum : int {Water = 1, Swamp, Rock, Soil};
 
 EdgeInfo edge_info(const int rc, const int lt, const int tt, const float length)
 {
@@ -33,6 +36,94 @@ EdgeInfo edge_info(const int rc, const int lt, const int tt, const float length)
 }
 
 /////////
+
+// UMaALtd Report p55-p57 (Jumping Pound sample problem)
+// nb: edge length computed from node coordinates
+// nb: river crossings ignored
+std::vector<InputStrip> inputf =
+{
+    {
+        {0, 0, 395, -1, -1, -1, -1, -1, },
+    },
+    {
+        {6550, -3240, 403, 0, Swamp, SmallTrees,0, 0, },
+        {5850, -2245, 402, 0, Swamp,SmallTrees,0, 0, },
+        {5220, -1407, 395, 0, Swamp,SmallTrees,0, 0, },
+        {4560, -332, 413, 0, Swamp,SmallTrees,0, 0, },
+        {3820, -665, 445, 0, Swamp,SmallTrees,0, 0, },
+        {3150, -1660, 448, 0, Swamp,SmallTrees,0, 0, },
+    },
+    {
+        {8800, -3650, 340, 0, Swamp, SmallTrees, 0, 2, },
+        {8060, -2160, 320, 0, Soil, SmallTrees, 0, 3, },
+        {7395, -1050, 318, 0, Swamp, SmallTrees, 0, 3, },
+        {6650, -166, 315, 0, Soil, SmallTrees, 1, 4, },
+        {5810, 1080, 342, 0, Rock, SmallTrees, 3, 5, },
+        {4980, 2245, 340, 0, Soil, SmallTrees, 4, 5, },
+    },
+    {
+        {14200, -4230, 170, 0, Swamp, LargeTrees, 0, 2, },
+        {12600, -3240, 185, 0, Swamp, LargeTrees, 0, 2, },
+        {11300, -2160, 195, 0, Swamp, LargeTrees, 0, 3, },
+        {10400, -995, 200, 0, Swamp, SmallTrees, 1, 4, },
+        {9450, -83, 225, 0, Swamp, SmallTrees, 1, 4, },
+        {8550, 747, 252, 0, Swamp, LargeTrees, 2, 5, },
+        {7550, 1660, 270, 0, Swamp, LargeTrees, 3, 5, },
+        {6650, 2245, 276, 0, Swamp, LargeTrees, 4, 5, },
+    },
+    {
+        {16050, -4325, 188, 0, Swamp, SmallTrees, 0, 1, },
+        {15450, -3820, 200, 0, Swamp, SmallTrees, 0, 1, },
+        {14480, -2825, 220, 0, Swamp, SmallTrees, 0, 2, },
+        {13470, -1660, 240, 0, Swamp, LargeTrees, 1, 3, },
+        {12800, -415, 300, 0, Swamp, LargeTrees, 2, 5, },
+        {12170, 830, 250, 0, Swamp, LargeTrees, 3, 6, },
+        {11750, 1910, 210, 0, Swamp, SmallTrees, 4, 7, },
+        {11400, 2990, 190, 0, Swamp, SmallTrees, 5, 7, },
+    },
+    {
+        {19500, -4150, 100, 0, Rock, SmallTrees, 0, 2, },
+        {18850, -3245, 100, 0, Rock, SmallTrees, 0, 3, },
+        {18300, -2480, 100, 0, Rock, SmallTrees, 0, 3, },
+        {17900, -1660, 100, 0, Rock, LargeTrees, 1, 4, },
+        {16900, -581, 110, 0, Swamp, LargeTrees, 2, 5, },
+        {16050, 333, 120, 0, Swamp, LargeTrees, 3, 6, },
+        {15380, 1165, 125, 0, Swamp, LargeTrees, 3, 7, },
+        {14800, 1995, 150, 0, Swamp, LargeTrees, 4, 7, },
+        {14150, 2825, 175, 0, Swamp, LargeTrees, 5, 7, },
+    },
+    {
+        {22600, -3750, 70, 0, Swamp, LargeTrees, 0, 2, },
+        {22100, -2820, 73, 0, Swamp, LargeTrees, 0, 3, },
+        {21450, -1990, 95, 0, Swamp, LargeTrees, 0, 4, },
+        {20900, -1285, 125, 0, Swamp, SmallTrees, 1, 5, },
+        {20200, -498, 170, 0, Swamp, SmallTrees, 2, 6, },
+        {19800, 166, 220, 0, Swamp, LargeTrees, 2, 6, },
+        {19350, 748, 275, 0, Water, LargeTrees, 3, 7, },
+        {18800, 1245, 350, 0, Water, LargeTrees, 4, 8, },
+        {18300, 2035, 395, 0, Water, LargeTrees, 5, 8, },
+    },
+    {
+        {25300, -2745, 35, 0, Swamp, SmallTrees, 0, 2, },
+        {24900, -2245, 35, 0, Rock, SmallTrees, 0, 2, },
+        {24600, -1700, 35, 0, Rock, SmallTrees, 0, 4, },
+        {24200, -995, 40, 0, Rock, SmallTrees, 1, 5, },
+        {23800, -249, 70, 0, Rock, SmallTrees, 1, 6, },
+        {23300, 665, 75, 0, Rock, LargeTrees, 2, 8, },
+        {22700, 1415, 75, 0, Swamp, LargeTrees, 4, 8, },
+    },
+    {
+        {30900, -1785, 25, 0, Swamp, SmallTrees, 0, 3, },
+        {26900, -1285, 25, 0, Swamp, LargeTrees, 0, 4, },
+        {26550, -665, 65, 0, Swamp, LargeTrees, 0, 5, },
+        {26300, -166, 90, 0, Swamp, LargeTrees, 1, 6, },
+        {26000, 374, 120, 0, Swamp, SmallTrees, 2, 6, },
+        {25500, 1080, 1500, 0, Swamp, SmallTrees, 3, 6, },
+    },
+    {
+        {30500, 0, -10, 0, Swamp, SmallTrees, 0, 5, },
+    },
+};
 
 std::vector<XYZ> node_pos =
 {
