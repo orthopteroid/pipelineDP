@@ -9,15 +9,13 @@
 #include <limits>
 #include <valarray>
 
-struct StripInfo { float x, y, z; int rc, lt, tt; int ps, pe; };
+struct StripInfo { float x, y, z; int rc, lt, tt; int pb, pe; };
 using InputStrip = std::vector<StripInfo>;
 
 using Node = uint16_t;
 using Edge = std::pair<Node, Node>;
 
 struct EdgeInfo { float edge_cost; };
-using EdgeMap = std::map<Edge, EdgeInfo>;
-using DAG = std::vector< std::deque<Node> >;
 
 struct XYZ { float x, y, z; };
 struct NodeAndCost { Node node; float path_cost; };
@@ -28,19 +26,12 @@ const NodeAndCost nacZERO = {std::numeric_limits<uint16_t>::max(), 0};
 enum : int {NoLand = 0, Water, Swamp, Rock, Soil};
 enum : int {NoTrees = 0, SmallTrees, LargeTrees};
 
-EdgeInfo edge_info(const int rc, const int lt, const int tt, const float length)
-{
-    static std::array<float, 3> tree_costs = { 0, 0, 0.55, }; // none, small, large
-    static std::array<float, 5> land_costs = { 0, 1.5, 0.8, 2.5, 0.2, }; // none, water, swamp, rock, soil
-    return {rc * 10000 + length * (land_costs[lt] + tree_costs[tt]) };
-}
-
 /////////
 
 // UMaALtd Report p55-p57 (Jumping Pound sample problem)
 // nb: edge length computed from node coordinates
 // nb: river crossings ignored
-std::vector<InputStrip> inputf =
+std::vector<InputStrip> input_strips =
 {
     {
         {0, 0, 395, -1, -1, -1, -1, -1, },
@@ -125,38 +116,57 @@ std::vector<InputStrip> inputf =
     },
 };
 
-std::vector<XYZ> node_pos =
-{
-    /* 0 */ {0, 0, 0},
-    /* 1 */ {1, 1, 0},
-    /* 2 */ {1, 2, 0},
-    /* 3 */ {2, 3, 0},
-};
-
-DAG fwd_linkage =
-{
-    /* 0 */ { {1, 2} },
-    /* 1 */ { {3} },
-    /* 2 */ { {3} },
-    /* 3 */ { /* end */ },
-};
-
-EdgeMap edge_cost =
-{
-    { {0,1}, edge_info(0, Soil, SmallTrees, 4500) },
-    { {0,2}, edge_info(0, Soil, SmallTrees, 6000) },
-    { {1,3}, edge_info(0, Soil, SmallTrees, 5800) },
-    { {2,3}, edge_info(0, Soil, SmallTrees, 3500) },
-};
+std::array<float, 5> land_costs = { 0, 1.5, 0.8, 2.5, 0.2, }; // none, water, swamp, rock, soil
+std::array<float, 3> tree_costs = { 0, 0, 0.55, }; // none, small, large
 
 int main()
 {
-    std::deque<Node> visit_stack;
-    std::vector<bool> fwd_visit_marking(fwd_linkage.size());
+    std::vector< std::vector<Node> > input_strip_numbering(input_strips.size());
+    std::vector<XYZ> node_pos;
+    std::vector< std::deque<Node> > bwd_linkage;
+    std::vector< std::deque<Node> > fwd_linkage;
+    std::map<Edge, EdgeInfo> edge_cost;
 
+    std::cout << "Parsing input data...\n";
+    Node n;
+    int s, i, j;
+    for(n = 0, s = 0; s < input_strips.size(); ++s)
+    {
+        input_strip_numbering[s].resize(input_strips[s].size());
+        for (i = 0; i < input_strips[s].size(); ++i)
+            input_strip_numbering[s][i] = n + i;
+        n += input_strips[s].size();
+    }
+    bwd_linkage.resize(n );
+    fwd_linkage.resize(n );
+
+    n = 1; // nb: start at 1
+    StripInfo& info = input_strips[0][0];
+    node_pos.push_back({info.x, info.y, info.z}); // position
+    for(s = 1; s < input_strips.size(); ++s) // nb: start at 1
+        for(i = 0; i < input_strips[s].size(); ++i, ++n)
+        {
+            info = input_strips[s][i];
+            node_pos.push_back({info.x, info.y, info.z}); // position
+            for(j = info.pb; j <= info.pe; ++j) // nb: inclusive end
+            {
+                Node pn = input_strip_numbering[s - 1][j];
+                bwd_linkage[n].push_back(pn);
+                fwd_linkage[pn].push_back(n);
+            }
+            for(j = info.pb; j <= info.pe; ++j) // nb: inclusive end
+            {
+                Node pn = input_strip_numbering[s - 1][j];
+                float length = std::sqrt((node_pos[pn].x - node_pos[n].x)*(node_pos[pn].x - node_pos[n].x) + (node_pos[pn].y - node_pos[n].y)*(node_pos[pn].y - node_pos[n].y));
+                edge_cost.insert({{input_strip_numbering[s - 1][j], n}, {length * (land_costs[info.lt] + tree_costs[info.tt])}});
+            }
+        }
+
+    std::deque<Node> visit_stack;
     auto visit_stack_pop = [&]()
     { Node t = visit_stack.front(); visit_stack.pop_front(); return t; };
 
+    std::vector<bool> fwd_visit_marking(fwd_linkage.size());
     auto visit_stack_unique_visitation = [&] (Node n)
     {
         if (!fwd_visit_marking[n])
@@ -165,9 +175,6 @@ int main()
             visit_stack.push_back(n);
         }
     };
-
-    DAG bwd_linkage;
-    bwd_linkage.resize(fwd_linkage.size() );
 
     std::cout << "Linkages and costs:\n";
     visit_stack = {0};
@@ -200,7 +207,6 @@ int main()
             if (local_cost < fwd_local_min[t].path_cost)
                 fwd_local_min[t] = {f, local_cost};
             visit_stack_unique_visitation(t);
-            bwd_linkage[t].push_back(f);
         });
     }
 
@@ -221,7 +227,7 @@ int main()
         t = min_route_cost.node;
     }
 
-    std::cout << "Optimal route and cumulative path_cost:\n";
+    std::cout << "Optimal route and cumulative path cost:\n";
     std::for_each(bwd_global_min.begin(), bwd_global_min.end(), [&](NodeAndCost& nc)
     { std::cout << nc.node << ' ' << nc.path_cost << "\n"; });
     return 0;
