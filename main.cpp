@@ -109,7 +109,7 @@ std::vector<InputStrip> input_strips =
         {26550, -665, 65, 0, Swamp, LargeTrees, 0, 5, },
         {26300, -166, 90, 0, Swamp, LargeTrees, 1, 6, },
         {26000, 374, 120, 0, Swamp, SmallTrees, 2, 6, },
-        {25500, 1080, 1500, 0, Swamp, SmallTrees, 3, 6, },
+        {25500, 1080, 150, 0, Swamp, SmallTrees, 3, 6, },
     },
     {
         {30500, 0, -10, 0, Swamp, SmallTrees, 0, 5, },
