@@ -311,46 +311,73 @@ int main()
 
     ///////////////
 
+    auto solve = [&](const std::string& title, std::function<float(const PathStep& ps)> psa, std::function<void(PathStep& ps, Node f, float v)> pss, std::function<float(const EdgeInfo& ei)> eia)
+    {
+        std::vector<PathStep> fwd_min(fwd_linkage.size(), psMAX );
+
+        // forward pass: start at inlet and work towards outlet
+        fwd_min[0] = psZERO;
+        visit_stack = {0};
+        std::fill(fwd_visit_marking.begin(), fwd_visit_marking.end(), false);
+        while (!visit_stack.empty())
+        {
+            Node f = visit_stack_pop();
+            std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
+            {
+                auto v = psa(fwd_min[f]) + eia(edge_info[{f, t}]);
+                if (v < psa(fwd_min[t]))
+                {
+                    pss(fwd_min[t], f, v);
+                    fwd_min[t].cost = fwd_min[f].cost + edge_info[{f, t}].cost;
+                }
+                visit_stack.push_back(t);
+            });
+        }
+
+        // backward pass: start at outlet and work towards inlet
+        std::deque<PathStep> bwd_min;
+        Node t = nCount - 1;
+        PathStep hack;
+        pss(hack, t, psa(fwd_min[t]));
+        bwd_min.push_front(hack);
+        while (t != 0)
+        {
+            PathStep step_min = psMAX;
+            std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
+            {
+                auto v = psa(fwd_min[f]);
+                if (v < psa(step_min))
+                {
+                    pss(step_min, f, v);
+                    step_min.cost = fwd_min[f].cost;
+                }
+            });
+            bwd_min.push_front(step_min);
+            t = step_min.from_node;
+        }
+
+        std::cout << title;
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
+        { std::cout << "(" << ps.from_node << ' ' << psa(ps) << " " << ps.cost << ") "; });
+        std::cout << "total cost " << bwd_min.back().cost << "\n";
+    };
+
     std::cout << "Solving...\n";
 
-    std::vector<PathStep> fwd_min(fwd_linkage.size(), psMAX );
+    // path step accessors and setters for datatypes
+    auto psa_cost = [](const PathStep& ps) -> float { return ps.cost; };
+    auto pss_cost = [](PathStep& ps, Node f, float v) -> void { ps.from_node = f; ps.cost = v; };
+    auto eia_cost = [](const EdgeInfo& ei) -> float { return ei.cost; };
+    auto psa_length = [](const PathStep& ps) -> float { return ps.len; };
+    auto pss_length = [](PathStep& ps, Node f, float v) -> void { ps.from_node = f; ps.len = v; };
+    auto eia_length = [](const EdgeInfo& ei) -> float { return ei.len; };
+    auto psa_headloss = [](const PathStep& ps) -> float { return ps.dp; };
+    auto pss_headloss = [](PathStep& ps, Node f, float v) -> void { ps.from_node = f; ps.dp = v; };
+    auto eia_headloss = [](const EdgeInfo& ei) -> float { return ei.dp; };
 
-    // forward pass: start at inlet and work towards outlet
-    fwd_min[0] = psZERO;
-    visit_stack = {0};
-    std::fill(fwd_visit_marking.begin(), fwd_visit_marking.end(), false);
-    while (!visit_stack.empty())
-    {
-        Node f = visit_stack_pop();
-        std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
-        {
-            auto accumulation = fwd_min[f].cost + edge_info[{f, t}].cost;
-            if (accumulation < fwd_min[t].cost)
-                fwd_min[t] = {f, accumulation};
-            visit_stack.push_back(t);
-        });
-    }
+    solve("Optimal route with minimal cost:\n", psa_cost, pss_cost, eia_cost);
+    solve("Optimal route with minimal length:\n", psa_length, pss_length, eia_length);
+    solve("Optimal route with minimal headloss:\n", psa_headloss, pss_headloss, eia_headloss);
 
-    // backward pass: start at outlet and work towards inlet
-    std::deque<PathStep> bwd_min;
-    Node t = nCount - 1;
-    bwd_min.push_front({t, fwd_min[t].cost} );
-    while (t != 0)
-    {
-        PathStep step_min = psMAX;
-        std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
-        {
-            if (fwd_min[f].cost < step_min.cost)
-                step_min = {f, fwd_min[f].cost};
-        });
-        bwd_min.push_front(step_min);
-        t = step_min.from_node;
-    }
-
-    std::cout << "Optimal route with minimal cost:\n";
-
-    std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
-    { std::cout << "(" << ps.from_node << ' ' << ps.cost << ") "; });
-    std::cout << "\n";
     return 0;
 }
