@@ -18,7 +18,7 @@ using Edge = std::pair<Node, Node>;
 struct EdgeInfo { float edge_cost; };
 
 struct XYZ { float x, y, z; };
-struct PathStep { Node from_node; float path_cost; };
+struct PathStep { Node from_node; float path_cost, path_length, path_height, path_headloss; };
 
 const int nptINCR = 10;
 const int nptSIZE = nptINCR +1;
@@ -34,8 +34,8 @@ struct NodePressureTable {
 const float fMAX = std::numeric_limits<float>::max();
 const Node nMAX = std::numeric_limits<Node>::max();
 
-const PathStep psMAX = {nMAX, fMAX};
-const PathStep psZERO = {nMAX, 0};
+const PathStep psMAX = {nMAX, fMAX, fMAX, fMAX, fMAX};
+const PathStep psZERO = {nMAX, 0, 0, 0, 0};
 const NodePressureTable npsInit = {fMAX, -fMAX, fMAX, -fMAX /* ... */};
 
 enum : int {NoLand = 0, Water, Swamp, Rock, Soil};
@@ -149,14 +149,14 @@ PressureLoss flanigans_method(float inlet_pressure, float outlet_pressure)
     const double T = 90; // avg line temperature (buried pipe)
     const double Z = .867; // gas compressibilty factor
     const double Pav = (inlet_pressure + outlet_pressure) / 2; // avg pressure
-    const double U = 31194.f * QG * Z / Pav * D * D; // superficial velocity
+    const double U = 31194 * QG * Z / (Pav * D * D); // superficial velocity
     const double F1_logterm = std::log(U / std::pow(R, 0.32));
     const double F1 = std::exp(-.07464 * F1_logterm * F1_logterm + .4772 * F1_logterm - .8003); // friction loss efficiency factor
     const double C = 20500 / (std::pow(SG, .46) * std::pow(T+460,.54)); // friction factor for pressure loss
     return
     {
         float(std::pow(QG * 1E6 / ( C * std::pow(D, 2.6182) * F1 ), 1.853) / ( 2 * Pav ) / ftPerMile),
-        float((SL / 144) * (3.06 / (144 * (U + 3.06))))
+        float(SL * 3.06 / (144 * (U + 3.06)))
     };
 }
 
