@@ -20,11 +20,23 @@ struct EdgeInfo { float edge_cost; };
 struct XYZ { float x, y, z; };
 struct PathStep { Node from_node; float path_cost; };
 
+const int nptINCR = 10;
+const int nptSIZE = nptINCR +1;
+
+// used to dimension a node's L vs H pressure curves
+struct NodePressureTable {
+    float min_len, max_len, min_hill, max_hill;
+    float scale_len[nptSIZE];
+    float scale_hill[nptSIZE];
+    float table[nptSIZE][nptSIZE];
+};
+
 const float fMAX = std::numeric_limits<float>::max();
 const Node nMAX = std::numeric_limits<Node>::max();
 
 const PathStep psMAX = {nMAX, fMAX};
 const PathStep psZERO = {nMAX, 0};
+const NodePressureTable npsInit = {fMAX, -fMAX, fMAX, -fMAX /* ... */};
 
 enum : int {NoLand = 0, Water, Swamp, Rock, Soil};
 enum : int {NoTrees = 0, SmallTrees, LargeTrees};
@@ -125,25 +137,25 @@ std::array<float, 3> tree_costs = { 0, 0, 0.55, }; // none, small, large
 // "Two Phase Gathering Systems", The Oil and Gas Journal, Flanigan, 1958
 // pressure loss due to pipe length and pressure loss due to 'hills' (+ve vertical change)
 // empirical curve-fit method, for more complexity use Baker's method (Pipeline Engineer Handbook, Baker, 1960, ppH67)
-struct PressureDrop { float length, hills; /* psi / foot */ };
-PressureDrop flanigans_method(float P1, float P2)
+struct PressureLoss { float alpha, beta; /* dP for length and height in psi / foot */ };
+PressureLoss flanigans_method(float inlet_pressure, float outlet_pressure)
 {
-    // all inputs are crackpot guesses...
-    const double D = 12; // diameter
-    const double QG = 24; // gas flow rate in MMCFPD
-    const double R = .3; // gas / oil ratio
-    const double SG = 1.2; // gas gravity
-    const double SL = 4; // liquid gravity
-    const double T = 64; // avg line temperature (buried pipe)
-    const double Z = .85; // gas compressibilty factor
-    const double Pav = (P1 + P2) / 2; // avg pressure
+    const double ftPerMile = 5280;
+    const double D = 12.17; // diameter
+    const double QG = 73; // gas flow rate in MMCFPD
+    const double R = 7.3; // gas / oil ratio
+    const double SG = .7; // gas gravity
+    const double SL = 51.2; // liquid gravity
+    const double T = 90; // avg line temperature (buried pipe)
+    const double Z = .867; // gas compressibilty factor
+    const double Pav = (inlet_pressure + outlet_pressure) / 2; // avg pressure
     const double U = 31194.f * QG * Z / Pav * D * D; // superficial velocity
     const double F1_logterm = std::log(U / std::pow(R, 0.32));
     const double F1 = std::exp(-.7464 * F1_logterm * F1_logterm + .4772 * F1_logterm - .8003); // friction loss efficiency factor
     const double C = 20500 / (std::pow(SG, .46) * std::pow(T+460,.54)); // friction factor for pressure loss
     return
     {
-        float(std::pow(QG * 1E6 / ( C * std::pow(D, 2.6182) * F1 ), 1.853) / ( 2 * Pav )),
+        float(std::pow(QG * 1E6 / ( C * std::pow(D, 2.6182) * F1 ), 1.853) / ( 2 * Pav ) / ftPerMile),
         float(SL * 3.06 / (144 * U * 3.06))
     };
 }
@@ -151,6 +163,7 @@ PressureDrop flanigans_method(float P1, float P2)
 int main()
 {
     std::vector< std::vector<Node> > input_strip_numbering(input_strips.size());
+    std::vector<NodePressureTable> node_pressure_tables;
     std::vector<XYZ> node_pos;
     std::vector< std::deque<Node> > bwd_linkage;
     std::vector< std::deque<Node> > fwd_linkage;
@@ -170,6 +183,8 @@ int main()
         return dz > 0 ? dz : 0;
     };
 
+    PressureLoss pressure_loss = flanigans_method(880, 815);
+
     std::cout << "Parsing input data...\n";
     Node n;
     int s, i, j;
@@ -182,6 +197,7 @@ int main()
     }
     bwd_linkage.resize(n );
     fwd_linkage.resize(n );
+    node_pressure_tables.resize(n);
 
     n = 1; // nb: start at 1
     StripInfo& info = input_strips[0][0];
@@ -218,13 +234,51 @@ int main()
         }
     };
 
-    std::cout << "Linkages and costs:\n";
+    std::cout << "Computing Node L & H pressure tables...\n";
+    std::fill(node_pressure_tables.begin(), node_pressure_tables.end(), npsInit);
+    node_pressure_tables[0] = {0, 0, 0, 0};
+    visit_stack = {0};
+    while (!visit_stack.empty())
+    {
+        Node f = visit_stack_pop();
+        std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
+        {
+            float len = edge_length(f, t);
+            float hill = edge_hill(f, t);
+            node_pressure_tables[t].min_len = std::min(node_pressure_tables[t].min_len, node_pressure_tables[f].min_len + len);
+            node_pressure_tables[t].max_len = std::max(node_pressure_tables[t].max_len, node_pressure_tables[f].max_len + len);
+            node_pressure_tables[t].min_hill = std::min(node_pressure_tables[t].min_hill, node_pressure_tables[f].min_hill + hill);
+            node_pressure_tables[t].max_hill = std::max(node_pressure_tables[t].max_hill, node_pressure_tables[f].max_hill + hill);
+            visit_stack.push_back(t);
+        });
+    }
+
+    // tailor a specialized table for each node
+    std::for_each(node_pressure_tables.begin(), node_pressure_tables.end(), [&](NodePressureTable& npt)
+    {
+        if(npt.max_len == 0)
+            return;
+        float dl = (npt.max_len - npt.min_len) / nptINCR;
+        float dh = (npt.max_hill - npt.min_hill) / nptINCR;
+        for(i = 0; i < nptSIZE; ++i)
+        {
+            npt.scale_len[i] = npt.min_len + i * dl;
+            npt.scale_hill[i] = npt.min_hill + i * dh;
+        }
+        for(i = 0; i < nptSIZE; ++i) // len
+            for(j = 0; j < nptSIZE; ++j) // hill
+                npt.table[i][j] = pressure_loss.alpha * npt.scale_len[i] + pressure_loss.beta * npt.scale_hill[j];
+    });
+
+    std::cout << "Node Pressure Limits and Linkages:\n";
     visit_stack = {0};
     std::fill(fwd_visit_marking.begin(), fwd_visit_marking.end(), false);
     while (!visit_stack.empty())
     {
         Node f = visit_stack_pop();
+        auto nl = node_pressure_tables[f];
         std::cout << f;
+        std::cout << " mnlen " << nl.min_len << " mxlen " << nl.max_len << " mnhill " << nl.min_hill << " mxhill " << nl.max_hill;
         if( fwd_linkage[f].size() > 0)
             std::cout << " : ";
         std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
