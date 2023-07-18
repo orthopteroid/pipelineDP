@@ -19,13 +19,13 @@ struct EdgeInfo { float edge_cost; };
 
 struct XYZ { float x, y, z; };
 struct PathStep { Node from_node; float path_cost, path_length, path_height, path_headloss; };
+struct PathStepStat { float min_cost, max_cost, min_len, max_len, min_hill, max_hill; };
 
 const int nptINCR = 10;
 const int nptSIZE = nptINCR +1;
 
 // used to dimension a node's L vs H pressure curves
 struct NodePressureTable {
-    float min_len, max_len, min_hill, max_hill;
     float scale_len[nptSIZE];
     float scale_hill[nptSIZE];
     float table[nptSIZE][nptSIZE];
@@ -36,7 +36,7 @@ const Node nMAX = std::numeric_limits<Node>::max();
 
 const PathStep psMAX = {nMAX, fMAX, fMAX, fMAX, fMAX};
 const PathStep psZERO = {nMAX, 0, 0, 0, 0};
-const NodePressureTable npsInit = {fMAX, -fMAX, fMAX, -fMAX /* ... */};
+const PathStepStat pssInit = {fMAX, -fMAX, fMAX, -fMAX, fMAX, -fMAX};
 
 enum : int {NoLand = 0, Water, Swamp, Rock, Soil};
 enum : int {NoTrees = 0, SmallTrees, LargeTrees};
@@ -164,6 +164,7 @@ int main()
 {
     std::vector< std::vector<Node> > input_strip_numbering(input_strips.size());
     std::vector<NodePressureTable> node_pressure_tables;
+    std::vector<PathStepStat> node_path_stats;
     std::vector<XYZ> node_pos;
     std::vector< std::deque<Node> > bwd_linkage;
     std::vector< std::deque<Node> > fwd_linkage;
@@ -197,16 +198,18 @@ int main()
     }
     bwd_linkage.resize(n );
     fwd_linkage.resize(n );
+    node_pos.resize(n );
+    node_path_stats.resize(n);
     node_pressure_tables.resize(n);
 
-    n = 1; // nb: start at 1
     StripInfo& info = input_strips[0][0];
-    node_pos.push_back({info.x, info.y, info.z}); // position
+    node_pos[0] = {info.x, info.y, info.z};
     for(s = 1; s < input_strips.size(); ++s) // nb: start at 1
-        for(i = 0; i < input_strips[s].size(); ++i, ++n)
+        for(i = 0; i < input_strips[s].size(); ++i)
         {
             info = input_strips[s][i];
-            node_pos.push_back({info.x, info.y, info.z}); // position
+            n = input_strip_numbering[s][i];
+            node_pos[n] = {info.x, info.y, info.z};
             for(j = info.pb; j <= info.pe; ++j) // nb: inclusive end
             {
                 Node pn = input_strip_numbering[s - 1][j];
@@ -235,8 +238,8 @@ int main()
     };
 
     std::cout << "Computing Node L & H pressure tables...\n";
-    std::fill(node_pressure_tables.begin(), node_pressure_tables.end(), npsInit);
-    node_pressure_tables[0] = {0, 0, 0, 0};
+    std::fill(node_path_stats.begin(), node_path_stats.end(), pssInit);
+    node_path_stats[0] = {0, 0, 0, 0, 0, 0};
     visit_stack = {0};
     while (!visit_stack.empty())
     {
@@ -245,46 +248,56 @@ int main()
         {
             float len = edge_length(f, t);
             float hill = edge_hill(f, t);
-            node_pressure_tables[t].min_len = std::min(node_pressure_tables[t].min_len, node_pressure_tables[f].min_len + len);
-            node_pressure_tables[t].max_len = std::max(node_pressure_tables[t].max_len, node_pressure_tables[f].max_len + len);
-            node_pressure_tables[t].min_hill = std::min(node_pressure_tables[t].min_hill, node_pressure_tables[f].min_hill + hill);
-            node_pressure_tables[t].max_hill = std::max(node_pressure_tables[t].max_hill, node_pressure_tables[f].max_hill + hill);
+            PathStepStat& pss_f = node_path_stats[f];
+            PathStepStat& pss_t = node_path_stats[t];
+            EdgeInfo& ec = edge_cost[{f,t}];
+
+            pss_t.min_cost = std::min(pss_t.min_cost, pss_f.min_cost + ec.edge_cost);
+            pss_t.max_cost = std::max(pss_t.max_cost, pss_f.max_cost + ec.edge_cost);
+            pss_t.min_len = std::min(pss_t.min_len, pss_f.min_len + len);
+            pss_t.max_len = std::max(pss_t.max_len, pss_f.max_len + len);
+            pss_t.min_hill = std::min(pss_t.min_hill, pss_f.min_hill + hill);
+            pss_t.max_hill = std::max(pss_t.max_hill, pss_f.max_hill + hill);
             visit_stack.push_back(t);
         });
     }
 
     // tailor a specialized table for each node
-    std::for_each(node_pressure_tables.begin(), node_pressure_tables.end(), [&](NodePressureTable& npt)
+    for(n = 1; n < node_pos.size(); ++n) // nb: start at 1
     {
-        if(npt.max_len == 0)
-            return;
-        float dl = (npt.max_len - npt.min_len) / nptINCR;
-        float dh = (npt.max_hill - npt.min_hill) / nptINCR;
+        NodePressureTable& npt = node_pressure_tables[n];
+        PathStepStat& pss = node_path_stats[n];
+        float dl = (pss.max_len - pss.min_len) / nptINCR;
+        float dh = (pss.max_hill - pss.min_hill) / nptINCR;
         for(i = 0; i < nptSIZE; ++i)
         {
-            npt.scale_len[i] = npt.min_len + i * dl;
-            npt.scale_hill[i] = npt.min_hill + i * dh;
+            npt.scale_len[i] = pss.min_len + i * dl;
+            npt.scale_hill[i] = pss.min_hill + i * dh;
         }
         for(i = 0; i < nptSIZE; ++i) // len
             for(j = 0; j < nptSIZE; ++j) // hill
                 npt.table[i][j] = pressure_loss.alpha * npt.scale_len[i] + pressure_loss.beta * npt.scale_hill[j];
-    });
+    }
 
-    std::cout << "Node Pressure Limits and Linkages:\n";
+    std::cout << "Node Path Limits and Linkages:\n";
     visit_stack = {0};
     std::fill(fwd_visit_marking.begin(), fwd_visit_marking.end(), false);
+    std::cout << "f mncost mxcost mnlen mxlen mnhill mxhill : t cost\n";
     while (!visit_stack.empty())
     {
         Node f = visit_stack_pop();
+        PathStepStat& pss = node_path_stats[f];
         auto nl = node_pressure_tables[f];
-        std::cout << f;
-        std::cout << " mnlen " << nl.min_len << " mxlen " << nl.max_len << " mnhill " << nl.min_hill << " mxhill " << nl.max_hill;
+        std::cout << f << " ";
+        std::cout << pss.min_cost  << " " << pss.max_cost << " ";
+        std::cout << pss.min_len  << " " << pss.max_len << " ";
+        std::cout << pss.min_hill  << " " << pss.max_hill << " ";
         if( fwd_linkage[f].size() > 0)
-            std::cout << " : ";
+            std::cout << ": ";
         std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
         {
-            std::cout << t;
-            std::cout << " cost " << edge_cost[{f, t}].edge_cost << " ";
+            std::cout << t << " ";
+            std::cout << edge_cost[{f, t}].edge_cost << " ";
             visit_stack_unique_visitation(t);
         });
         std::cout << "\n";
