@@ -151,12 +151,12 @@ PressureLoss flanigans_method(float inlet_pressure, float outlet_pressure)
     const double Pav = (inlet_pressure + outlet_pressure) / 2; // avg pressure
     const double U = 31194.f * QG * Z / Pav * D * D; // superficial velocity
     const double F1_logterm = std::log(U / std::pow(R, 0.32));
-    const double F1 = std::exp(-.7464 * F1_logterm * F1_logterm + .4772 * F1_logterm - .8003); // friction loss efficiency factor
+    const double F1 = std::exp(-.07464 * F1_logterm * F1_logterm + .4772 * F1_logterm - .8003); // friction loss efficiency factor
     const double C = 20500 / (std::pow(SG, .46) * std::pow(T+460,.54)); // friction factor for pressure loss
     return
     {
         float(std::pow(QG * 1E6 / ( C * std::pow(D, 2.6182) * F1 ), 1.853) / ( 2 * Pav ) / ftPerMile),
-        float(SL * 3.06 / (144 * U * 3.06))
+        float((SL / 144) * (3.06 / (144 * (U + 3.06))))
     };
 }
 
