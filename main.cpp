@@ -157,6 +157,7 @@ std::vector<InputStrip> input_strips =
     },
 };
 
+float pipe_cost = 6;
 std::array<float, 5> land_costs = { 0, 1.5, 0.8, 2.5, 0.2, }; // none, water, swamp, rock, soil
 std::array<float, 3> tree_costs = { 0, 0, 0.55, }; // none, small, large
 
@@ -219,7 +220,7 @@ int main()
                 {
                     {f, t},
                     {
-                        edge_length(f, t) * (land_costs[info.lt] + tree_costs[info.tt]),
+                        edge_length(f, t) * (land_costs[info.lt] + tree_costs[info.tt] + pipe_cost),
                         edge_length(f, t),
                         edge_hill(f, t),
                         pressure_loss.alpha * edge_length(f, t) + pressure_loss.beta * edge_hill(f, t)
