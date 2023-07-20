@@ -312,73 +312,81 @@ int main()
 
     ///////////////
 
-    auto solve = [&](const std::string& title, std::function<float(const PathStep& ps)> psa, std::function<void(PathStep& ps, Node f, float v)> pss, std::function<float(const EdgeInfo& ei)> eia)
+    auto solve = [&](const std::string& title, std::function<float(const PathStep& ps)> psa)
     {
-        std::vector<PathStep> fwd_min(fwd_linkage.size(), psMAX );
-
         // forward pass: start at inlet and work towards outlet
+        std::vector<PathStep> fwd_min(fwd_linkage.size(), psMAX );
         fwd_min[0] = psZERO;
         visit_stack = {0};
         std::fill(fwd_visit_marking.begin(), fwd_visit_marking.end(), false);
         while (!visit_stack.empty())
         {
             Node f = visit_stack_pop();
+            PathStep step_accumulation;
             std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
             {
-                auto v = psa(fwd_min[f]) + eia(edge_info[{f, t}]);
-                if (v < psa(fwd_min[t]))
-                {
-                    pss(fwd_min[t], f, v);
-                    fwd_min[t].cost = fwd_min[f].cost + edge_info[{f, t}].cost;
-                }
+                step_accumulation.from_node = f;
+                step_accumulation.cost = fwd_min[f].cost + edge_info[{f, t}].cost;
+                step_accumulation.len = fwd_min[f].len + edge_info[{f, t}].len;
+                step_accumulation.hill = fwd_min[f].hill + edge_info[{f, t}].hill;
+                step_accumulation.dp = fwd_min[f].dp + edge_info[{f, t}].dp;
+                if (psa(step_accumulation) < psa(fwd_min[t]))
+                    fwd_min[t] = step_accumulation;
                 visit_stack.push_back(t);
             });
         }
 
-        // backward pass: start at outlet and work towards inlet
+        // backward pass: start at outlet and work towards inlet following the route of least-remainder
         std::deque<PathStep> bwd_min;
+        bwd_min.push_front(fwd_min[nCount - 1]);
         Node t = nCount - 1;
-        PathStep hack;
-        pss(hack, t, psa(fwd_min[t]));
-        bwd_min.push_front(hack);
-        while (t != 0)
+        bwd_min.front().from_node = t; // hack
+        while (true)
         {
-            PathStep step_min = psMAX;
+            PathStep step_min;
+            float remainder_min = fMAX;
             std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
             {
-                auto v = psa(fwd_min[f]);
-                if (v < psa(step_min))
+                if (psa(fwd_min[f]) < remainder_min)
                 {
-                    pss(step_min, f, v);
-                    step_min.cost = fwd_min[f].cost;
+                    remainder_min = psa(fwd_min[f]);
+                    step_min = fwd_min[f];
                 }
             });
+            Node f = step_min.from_node;
+            step_min.cost -= edge_info[{f, t}].cost;
+            step_min.len -= edge_info[{f, t}].len;
+            step_min.hill -= edge_info[{f, t}].hill;
+            step_min.dp -= edge_info[{f, t}].dp;
             bwd_min.push_front(step_min);
-            t = step_min.from_node;
+            if(step_min.from_node == nMAX)
+                break;
+            t = step_min.from_node; // change to node in previous strip
         }
+        bwd_min.front().from_node = 0; // hack
 
-        std::cout << title;
+        std::cout << "\nOptimal route with minimal " << title << ": ";
         std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
-        { std::cout << "(" << ps.from_node << ' ' << psa(ps) << " " << ps.cost << ") "; });
-        std::cout << "total cost " << bwd_min.back().cost << "\n";
+        { std::cout << ps.from_node << ' '; });
+        std::cout << "\nCumulative cost: ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
+        { std::cout << ps.cost << ' '; });
+        std::cout << "\nCumulative " << title << ": ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
+        { std::cout << psa(ps) << ' '; });
+        std::cout << "\n";
     };
 
     std::cout << "Solving...\n";
 
-    // path step accessors and setters for datatypes
+    // path step accessors
     auto psa_cost = [](const PathStep& ps) -> float { return ps.cost; };
-    auto pss_cost = [](PathStep& ps, Node f, float v) -> void { ps.from_node = f; ps.cost = v; };
-    auto eia_cost = [](const EdgeInfo& ei) -> float { return ei.cost; };
     auto psa_length = [](const PathStep& ps) -> float { return ps.len; };
-    auto pss_length = [](PathStep& ps, Node f, float v) -> void { ps.from_node = f; ps.len = v; };
-    auto eia_length = [](const EdgeInfo& ei) -> float { return ei.len; };
-    auto psa_headloss = [](const PathStep& ps) -> float { return ps.dp; };
-    auto pss_headloss = [](PathStep& ps, Node f, float v) -> void { ps.from_node = f; ps.dp = v; };
-    auto eia_headloss = [](const EdgeInfo& ei) -> float { return ei.dp; };
+    auto psa_pressureloss = [](const PathStep& ps) -> float { return ps.dp; };
 
-    solve("Optimal route with minimal cost:\n", psa_cost, pss_cost, eia_cost);
-    solve("Optimal route with minimal length:\n", psa_length, pss_length, eia_length);
-    solve("Optimal route with minimal headloss:\n", psa_headloss, pss_headloss, eia_headloss);
+    solve("cost ", psa_cost);
+    solve("length ", psa_length);
+    solve("pressureloss ", psa_pressureloss);
 
     return 0;
 }
