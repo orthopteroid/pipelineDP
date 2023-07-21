@@ -8,18 +8,19 @@
 #include <deque>
 #include <limits>
 #include <valarray>
+#include <cassert>
 
 using Node = uint16_t;
 using Edge = std::pair<Node, Node>;
 
-struct StripInfo { float x, y, z; int rc, lt, tt; int pb, pe; /**/ Node n;};
-using InputStrip = std::vector<StripInfo>;
-
+struct StripInfo { /* input */ float x, y, z; int rc, lt, tt; int pb, pe; /* modified */ Node n;};
 struct EdgeInfo { float cost, len, hill, dp; };
+struct NodeInfo { float x, y, z; int strip, index; };
 
-struct XYZ { float x, y, z; };
 struct PathStep { Node from_node; float cost, len, hill, dp; };
 struct PathStepStat { float min_cost, max_cost, min_len, max_len, min_hill, max_hill, min_dp, max_dp; };
+
+using InputStrip = std::vector<StripInfo>;
 
 const int nptINCR = 10;
 const int nptSIZE = nptINCR +1;
@@ -166,7 +167,7 @@ PressureLoss pressure_loss = flanigans_method(880, 815);
 int main()
 {
     Node nCount = 0;
-    std::vector<XYZ> node_pos;
+    std::vector<NodeInfo> node_info;
     std::map<Edge, EdgeInfo> edge_info;
     std::vector< std::deque<Node> > bwd_linkage;
     std::vector< std::deque<Node> > fwd_linkage;
@@ -178,16 +179,22 @@ int main()
 
     auto edge_length = [&](Node f, Node t) -> float
     {
-        const float dx = node_pos[t].x - node_pos[f].x;
-        const float dy = node_pos[t].y - node_pos[f].y;
-        const float dz = node_pos[t].z - node_pos[f].z;
+        const float dx = node_info[t].x - node_info[f].x;
+        const float dy = node_info[t].y - node_info[f].y;
+        const float dz = node_info[t].z - node_info[f].z;
         return std::sqrt( dx * dx + dy * dy + dz * dz );
     };
 
     auto edge_hill = [&](Node f, Node t) -> float
     {
-        const float dz = node_pos[t].z - node_pos[f].z;
+        const float dz = node_info[t].z - node_info[f].z;
         return dz > 0 ? dz : 0;
+    };
+
+    auto elev_gain = [&](float f_elev, Node f, Node t) -> float
+    {
+        const float dz = node_info[t].z - node_info[f].z;
+        return f_elev + (dz > 0 ? dz : 0);
     };
 
     std::cout << "Parsing input data...\n";
@@ -198,21 +205,21 @@ int main()
 
     bwd_linkage.resize(nCount);
     fwd_linkage.resize(nCount);
-    node_pos.resize(nCount);
+    node_info.resize(nCount);
     node_path_stats.resize(nCount);
-    node_pressure_tables.resize(nCount);
     fwd_visit_marking.resize(nCount);
 
-    node_pos[0] = {input_strips[0][0].x, input_strips[0][0].y, input_strips[0][0].z};
+    node_info[0] = {input_strips[0][0].x, input_strips[0][0].y, input_strips[0][0].z, 0, 0};
     for(int s = 1; s < input_strips.size(); ++s) // nb: start at 1
         for(int i = 0; i < input_strips[s].size(); ++i)
         {
             const StripInfo& info = input_strips[s][i];
             const Node t = input_strips[s][i].n;
-            node_pos[t] = {info.x, info.y, info.z};
+            node_info[t] = {info.x, info.y, info.z, s, i};
             for(int j = info.pb; j <= info.pe; ++j) // nb: inclusive end
             {
                 const Node f = input_strips[s - 1][j].n;
+                assert( node_info[f].strip == node_info[t].strip -1 ); // 'strip' topology constraint
                 bwd_linkage[t].push_back(f);
                 fwd_linkage[f].push_back(t);
                 //
@@ -267,23 +274,6 @@ int main()
         });
     }
 
-    // tailor a specialized pressure table for each node
-    for(Node t = 1; t < nCount; ++t) // nb: start at 1
-    {
-        NodePressureTable& npt = node_pressure_tables[t];
-        const PathStepStat& pss = node_path_stats[t];
-        const float dl = (pss.max_len - pss.min_len) / nptINCR;
-        const float dh = (pss.max_hill - pss.min_hill) / nptINCR;
-        for(int i = 0; i < nptSIZE; ++i)
-        {
-            npt.scale_len[i] = pss.min_len + float(i) * dl;
-            npt.scale_hill[i] = pss.min_hill + float(i) * dh;
-        }
-        for(int i = 0; i < nptSIZE; ++i) // len
-            for(int j = 0; j < nptSIZE; ++j) // hill
-                npt.table[i][j] = pressure_loss.alpha * npt.scale_len[i] + pressure_loss.beta * npt.scale_hill[j];
-    }
-
     std::cout << "Node Path Limits and Linkages:\n";
 
     visit_stack = {0};
@@ -293,8 +283,7 @@ int main()
     {
         Node f = visit_stack_pop();
         PathStepStat& pss = node_path_stats[f];
-        auto nl = node_pressure_tables[f];
-        std::cout << f << " ";
+        std::cout << f << " (" << node_info[f].strip << ',' << node_info[f].index << ") ";
         std::cout << pss.min_cost  << " " << pss.max_cost << " ";
         std::cout << pss.min_len  << " " << pss.max_len << " ";
         std::cout << pss.min_hill  << " " << pss.max_hill << " ";
@@ -328,7 +317,6 @@ int main()
                 step_accumulation.from_node = f;
                 step_accumulation.cost = fwd_min[f].cost + edge_info[{f, t}].cost;
                 step_accumulation.len = fwd_min[f].len + edge_info[{f, t}].len;
-                step_accumulation.hill = fwd_min[f].hill + edge_info[{f, t}].hill;
                 step_accumulation.dp = fwd_min[f].dp + edge_info[{f, t}].dp;
                 if (psa(step_accumulation) < psa(fwd_min[t]))
                     fwd_min[t] = step_accumulation;
@@ -341,7 +329,7 @@ int main()
         bwd_min.push_front(fwd_min[nCount - 1]);
         Node t = nCount - 1;
         bwd_min.front().from_node = t; // hack
-        while (true)
+        while (t != 0)
         {
             PathStep step_min;
             float remainder_min = fMAX;
@@ -351,29 +339,38 @@ int main()
                 {
                     remainder_min = psa(fwd_min[f]);
                     step_min = fwd_min[f];
+                    step_min.from_node = f; // hack
                 }
             });
-            Node f = step_min.from_node;
-            step_min.cost -= edge_info[{f, t}].cost;
-            step_min.len -= edge_info[{f, t}].len;
-            step_min.hill -= edge_info[{f, t}].hill;
-            step_min.dp -= edge_info[{f, t}].dp;
             bwd_min.push_front(step_min);
-            if(step_min.from_node == nMAX)
-                break;
             t = step_min.from_node; // change to node in previous strip
         }
         bwd_min.front().from_node = 0; // hack
 
-        std::cout << "\nOptimal route with minimal " << title << ": ";
+        // calc total hill-climb
+        bwd_min[0].hill = 0;
+        for(int i = 1; i < bwd_min.size(); ++i)
+            bwd_min[i].hill = elev_gain(bwd_min[i -1].hill, bwd_min[i -1].from_node, bwd_min[i].from_node);
+
+        std::cout << "\nMinimized " << title;
+        std::cout << "\nOptimal route (nodes): ";
         std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
         { std::cout << ps.from_node << ' '; });
+        std::cout << "\nOptimal route (strip,index): ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
+        { std::cout << "(" << node_info[ps.from_node].strip << "," << node_info[ps.from_node].index << ") "; });
         std::cout << "\nCumulative cost: ";
         std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
         { std::cout << ps.cost << ' '; });
-        std::cout << "\nCumulative " << title << ": ";
+        std::cout << "\nCumulative length: ";
         std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
-        { std::cout << psa(ps) << ' '; });
+        { std::cout << ps.len << ' '; });
+        std::cout << "\nCumulative hills: ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
+        { std::cout << ps.hill << ' '; });
+        std::cout << "\nCumulative pressureloss: ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
+        { std::cout << ps.dp << ' '; });
         std::cout << "\n";
     };
 
