@@ -1,5 +1,15 @@
 # pipelineDP
-Dynamic Program for pipeline network routing. Based on a report by Uri Shamir (1969) and later published in 1971 as:
+Dynamic Program for pipeline network routing.
+
+The pipeline problem being solved here is a diamond shaped network with the known inlet and outlet at the tips but an indeterminate route.
+
+The allowed routes all flow from inlet to outlet through connecting layers (or 'strips') of a finite number of points in the form a Directed Acyclic Graph.
+
+The edges between the points in adjacent layers have their own terrain clearing costs and elevation gains, the latter of which is important when considering headloss (pressureloss) in the type of pipe that is being modelled here. Specifically, this DP considers a combined headloss for the gas and the oil components in the pipe. 
+
+This implementation is able to compare the cost, length and pressureloss minimizations, for your edification.
+
+Based on a report by Uri Shamir (1969) and later published in 1971 as:
 
 https://shamir.net.technion.ac.il/files/2012/04/1971-Optimal-Route-for-Pipelines-in-Two-Phase-flow.pdf
 
