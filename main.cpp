@@ -207,6 +207,7 @@ int main()
     fwd_linkage.resize(nCount);
     node_info.resize(nCount);
     node_path_stats.resize(nCount);
+    node_pressure_tables.resize(nCount);
     fwd_visit_marking.resize(nCount);
 
     node_info[0] = {input_strips[0][0].x, input_strips[0][0].y, input_strips[0][0].z, 0, 0};
@@ -274,6 +275,23 @@ int main()
         });
     }
 
+    // tailor a specialized pressure table for each node
+    for(Node t = 1; t < nCount; ++t) // nb: start at 1
+    {
+        NodePressureTable& npt = node_pressure_tables[t];
+        const PathStepStat& pss = node_path_stats[t];
+        const float dl = (pss.max_len - pss.min_len) / nptINCR;
+        const float dh = (pss.max_hill - pss.min_hill) / nptINCR;
+        for(int i = 0; i < nptSIZE; ++i)
+        {
+            npt.scale_len[i] = pss.min_len + float(i) * dl;
+            npt.scale_hill[i] = pss.min_hill + float(i) * dh;
+        }
+        for(int i = 0; i < nptSIZE; ++i) // len
+            for(int j = 0; j < nptSIZE; ++j) // hill
+                npt.table[i][j] = pressure_loss.alpha * npt.scale_len[i] + pressure_loss.beta * npt.scale_hill[j];
+    }
+
     std::cout << "Node Path Limits and Linkages:\n";
 
     visit_stack = {0};
@@ -301,8 +319,33 @@ int main()
 
     ///////////////
 
-    auto solve = [&](const std::string& title, std::function<float(const PathStep& ps)> psa)
+    auto print_solution = [&](std::deque<PathStep>& bwd_min)
     {
+        std::cout << "Route (nodes): ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        { std::cout << ps.from_node << ' '; });
+        std::cout << "\nRoute (strip,index): ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        { std::cout << "(" << node_info[ps.from_node].strip << "," << node_info[ps.from_node].index << ") "; });
+        std::cout << "\nCumulative cost: ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        { std::cout << ps.cost << ' '; });
+        std::cout << "\nCumulative length: ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        { std::cout << ps.len << ' '; });
+        std::cout << "\nCumulative hills: ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        { std::cout << ps.hill << ' '; });
+        std::cout << "\nCumulative pressureloss: ";
+        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        { std::cout << ps.dp << ' '; });
+        std::cout << "\n";
+    };
+
+    auto minimize = [&](const std::string& title, std::function<float(const PathStep& ps)> psa)
+    {
+        std::cout << "\nMinimizing " << title << "\n";
+
         // forward pass: start at inlet and work towards outlet
         std::vector<PathStep> fwd_min(fwd_linkage.size(), psMAX );
         fwd_min[0] = psZERO;
@@ -352,38 +395,17 @@ int main()
         for(int i = 1; i < bwd_min.size(); ++i)
             bwd_min[i].hill = elev_gain(bwd_min[i -1].hill, bwd_min[i -1].from_node, bwd_min[i].from_node);
 
-        std::cout << "\nMinimized " << title;
-        std::cout << "\nOptimal route (nodes): ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
-        { std::cout << ps.from_node << ' '; });
-        std::cout << "\nOptimal route (strip,index): ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
-        { std::cout << "(" << node_info[ps.from_node].strip << "," << node_info[ps.from_node].index << ") "; });
-        std::cout << "\nCumulative cost: ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
-        { std::cout << ps.cost << ' '; });
-        std::cout << "\nCumulative length: ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
-        { std::cout << ps.len << ' '; });
-        std::cout << "\nCumulative hills: ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
-        { std::cout << ps.hill << ' '; });
-        std::cout << "\nCumulative pressureloss: ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep& ps)
-        { std::cout << ps.dp << ' '; });
-        std::cout << "\n";
+        print_solution(bwd_min);
     };
-
-    std::cout << "Solving...\n";
 
     // path step accessors
     auto psa_cost = [](const PathStep& ps) -> float { return ps.cost; };
     auto psa_length = [](const PathStep& ps) -> float { return ps.len; };
     auto psa_pressureloss = [](const PathStep& ps) -> float { return ps.dp; };
 
-    solve("cost ", psa_cost);
-    solve("length ", psa_length);
-    solve("pressureloss ", psa_pressureloss);
+    minimize("cost", psa_cost);
+    minimize("length", psa_length);
+    minimize("pressureloss", psa_pressureloss);
 
     return 0;
 }
