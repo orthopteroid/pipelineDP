@@ -17,7 +17,7 @@ struct StripInfo { /* input */ float x, y, z; int rc, lt, tt; int pb, pe; /* mod
 struct EdgeInfo { float cost, len, hill, dp; };
 struct NodeInfo { float x, y, z; int strip, index; };
 
-struct PathStep { Node from_node; float cost, len, hill, dp; };
+struct PathStep { Node path_node; float cost, len, hill, dp; };
 struct PathStepStat { float min_cost, max_cost, min_len, max_len, min_hill, max_hill, min_dp, max_dp; };
 
 using InputStrip = std::vector<StripInfo>;
@@ -36,7 +36,6 @@ const float fMAX = std::numeric_limits<float>::max();
 const Node nMAX = std::numeric_limits<Node>::max();
 
 const PathStep psMAX = {nMAX, fMAX, fMAX, fMAX, fMAX};
-const PathStep psZERO = {nMAX, 0, 0, 0, 0};
 const PathStepStat pssInit = {fMAX, -fMAX, fMAX, -fMAX, fMAX, -fMAX, fMAX, -fMAX};
 
 enum : int {NoLand = 0, Water, Swamp, Rock, Soil};
@@ -323,10 +322,10 @@ int main()
     {
         std::cout << "Route (nodes): ";
         std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
-        { std::cout << ps.from_node << ' '; });
+        { std::cout << ps.path_node << ' '; });
         std::cout << "\nRoute (strip,index): ";
         std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
-        { std::cout << "(" << node_info[ps.from_node].strip << "," << node_info[ps.from_node].index << ") "; });
+        { std::cout << "(" << node_info[ps.path_node].strip << "," << node_info[ps.path_node].index << ") "; });
         std::cout << "\nCumulative cost: ";
         std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
         { std::cout << ps.cost << ' '; });
@@ -348,16 +347,16 @@ int main()
 
         // forward pass: start at inlet and work towards outlet
         std::vector<PathStep> fwd_min(fwd_linkage.size(), psMAX );
-        fwd_min[0] = psZERO;
+        fwd_min[0] = {0, 0, 0, 0, 0};
         visit_stack = {0};
         std::fill(fwd_visit_marking.begin(), fwd_visit_marking.end(), false);
         while (!visit_stack.empty())
         {
             Node f = visit_stack_pop();
-            PathStep step_accumulation;
             std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
             {
-                step_accumulation.from_node = f;
+                PathStep step_accumulation;
+                step_accumulation.path_node = t; // remember t as on the minimum_path (if selected)
                 step_accumulation.cost = fwd_min[f].cost + edge_info[{f, t}].cost;
                 step_accumulation.len = fwd_min[f].len + edge_info[{f, t}].len;
                 step_accumulation.dp = fwd_min[f].dp + edge_info[{f, t}].dp;
@@ -371,29 +370,22 @@ int main()
         std::deque<PathStep> bwd_min;
         bwd_min.push_front(fwd_min[nCount - 1]);
         Node t = nCount - 1;
-        bwd_min.front().from_node = t; // hack
         while (t != 0)
         {
-            PathStep step_min;
-            float remainder_min = fMAX;
+            PathStep step_min = psMAX;
             std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
             {
-                if (psa(fwd_min[f]) < remainder_min)
-                {
-                    remainder_min = psa(fwd_min[f]);
+                if (psa(fwd_min[f]) < psa(step_min))
                     step_min = fwd_min[f];
-                    step_min.from_node = f; // hack
-                }
             });
             bwd_min.push_front(step_min);
-            t = step_min.from_node; // change to node in previous strip
+            t = step_min.path_node; // change to node in previous strip (node f)
         }
-        bwd_min.front().from_node = 0; // hack
 
         // calc total hill-climb
         bwd_min[0].hill = 0;
         for(int i = 1; i < bwd_min.size(); ++i)
-            bwd_min[i].hill = elev_gain(bwd_min[i -1].hill, bwd_min[i -1].from_node, bwd_min[i].from_node);
+            bwd_min[i].hill = elev_gain(bwd_min[i -1].hill, bwd_min[i -1].path_node, bwd_min[i].path_node);
 
         print_solution(bwd_min);
     };
