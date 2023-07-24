@@ -317,26 +317,32 @@ int main()
     }
 
     ///////////////
+    std::deque<PathStep> soln;
 
-    auto print_solution = [&](std::deque<PathStep>& bwd_min)
+    auto print_solution = [&]()
     {
+        // calc total hill-climb
+        soln[0].hill = 0;
+        for(int i = 1; i < soln.size(); ++i)
+            soln[i].hill = elev_gain(soln[i - 1].hill, soln[i - 1].path_node, soln[i].path_node);
+
         std::cout << "Route (nodes): ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
         { std::cout << ps.path_node << ' '; });
         std::cout << "\nRoute (strip,index): ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
         { std::cout << "(" << node_info[ps.path_node].strip << "," << node_info[ps.path_node].index << ") "; });
         std::cout << "\nCumulative cost: ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
         { std::cout << ps.cost << ' '; });
         std::cout << "\nCumulative length: ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
         { std::cout << ps.len << ' '; });
         std::cout << "\nCumulative hills: ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
         { std::cout << ps.hill << ' '; });
         std::cout << "\nCumulative pressureloss: ";
-        std::for_each(bwd_min.begin(), bwd_min.end(), [&](PathStep &ps)
+        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
         { std::cout << ps.dp << ' '; });
         std::cout << "\n";
     };
@@ -346,8 +352,8 @@ int main()
         std::cout << "\nMinimizing " << title << "\n";
 
         // forward pass: start at inlet and work towards outlet
-        std::vector<PathStep> fwd_min(fwd_linkage.size(), psMAX );
-        fwd_min[0] = {0, 0, 0, 0, 0};
+        std::vector<PathStep> fwd_accum(fwd_linkage.size(), psMAX );
+        fwd_accum[0] = {0, 0, 0, 0, 0};
         visit_stack = {0};
         std::fill(fwd_visit_marking.begin(), fwd_visit_marking.end(), false);
         while (!visit_stack.empty())
@@ -355,39 +361,34 @@ int main()
             Node f = visit_stack_pop();
             std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
             {
-                PathStep step_accumulation;
-                step_accumulation.path_node = t; // remember t as on the minimum_path (if selected)
-                step_accumulation.cost = fwd_min[f].cost + edge_info[{f, t}].cost;
-                step_accumulation.len = fwd_min[f].len + edge_info[{f, t}].len;
-                step_accumulation.dp = fwd_min[f].dp + edge_info[{f, t}].dp;
-                if (psa(step_accumulation) < psa(fwd_min[t]))
-                    fwd_min[t] = step_accumulation;
+                PathStep step_accum;
+                step_accum.path_node = t; // remember t as on the minimum_path (if selected)
+                step_accum.cost = fwd_accum[f].cost + edge_info[{f, t}].cost;
+                step_accum.len = fwd_accum[f].len + edge_info[{f, t}].len;
+                step_accum.dp = fwd_accum[f].dp + edge_info[{f, t}].dp;
+                if (psa(step_accum) < psa(fwd_accum[t]))
+                    fwd_accum[t] = step_accum;
                 visit_stack.push_back(t);
             });
         }
 
         // backward pass: start at outlet and work towards inlet following the route of least-remainder
-        std::deque<PathStep> bwd_min;
-        bwd_min.push_front(fwd_min[nCount - 1]);
+        soln.clear();
+        soln.push_front(fwd_accum[nCount - 1]);
         Node t = nCount - 1;
         while (t != 0)
         {
             PathStep step_min = psMAX;
             std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
             {
-                if (psa(fwd_min[f]) < psa(step_min))
-                    step_min = fwd_min[f];
+                if (psa(fwd_accum[f]) < psa(step_min))
+                    step_min = fwd_accum[f];
             });
-            bwd_min.push_front(step_min);
+            soln.push_front(step_min);
             t = step_min.path_node; // change to node in previous strip (node f)
         }
 
-        // calc total hill-climb
-        bwd_min[0].hill = 0;
-        for(int i = 1; i < bwd_min.size(); ++i)
-            bwd_min[i].hill = elev_gain(bwd_min[i -1].hill, bwd_min[i -1].path_node, bwd_min[i].path_node);
-
-        print_solution(bwd_min);
+        print_solution();
     };
 
     // path step accessors
