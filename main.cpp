@@ -18,7 +18,7 @@ struct EdgeInfo { float cost, len, hill, dp; };
 struct NodeInfo { float x, y, z; int strip, index; };
 
 struct PathStep { Node path_node; float cost, len, hill, dp; };
-struct PathStepStat { float min_cost, max_cost, min_len, max_len, min_hill, max_hill, min_dp, max_dp; };
+struct PathStepStat { float cost_min, cost_max, len_min, len_max, hill_min, hill_max, min_dp, max_dp; };
 
 using InputStrip = std::vector<StripInfo>;
 
@@ -27,16 +27,14 @@ const int nptSIZE = nptINCR +1;
 
 // used to dimension a node's L vs H pressure curves
 struct NodePressureTable {
-    float scale_len[nptSIZE];
-    float scale_hill[nptSIZE];
+    float len_scale[nptSIZE];
+    float hill_scale[nptSIZE];
     float table[nptSIZE /* len */ ][nptSIZE /* hill */ ];
 };
 
 const float fMAX = std::numeric_limits<float>::max();
+const int iMAX = std::numeric_limits<int>::max();
 const Node nMAX = std::numeric_limits<Node>::max();
-
-const PathStep psMAX = {nMAX, fMAX, fMAX, fMAX, fMAX};
-const PathStepStat pssInit = {fMAX, -fMAX, fMAX, -fMAX, fMAX, -fMAX, fMAX, -fMAX};
 
 enum : int {NoLand = 0, Water, Swamp, Rock, Soil};
 enum : int {NoTrees = 0, SmallTrees, LargeTrees};
@@ -170,7 +168,6 @@ int main()
     std::map<Edge, EdgeInfo> edge_info;
     std::vector< std::deque<Node> > bwd_linkage;
     std::vector< std::deque<Node> > fwd_linkage;
-    std::vector<NodePressureTable> node_pressure_tables;
     std::vector<PathStepStat> node_path_stats;
     //
     std::deque<Node> visit_stack;
@@ -206,7 +203,6 @@ int main()
     fwd_linkage.resize(nCount);
     node_info.resize(nCount);
     node_path_stats.resize(nCount);
-    node_pressure_tables.resize(nCount);
     fwd_visit_marking.resize(nCount);
 
     node_info[0] = {input_strips[0][0].x, input_strips[0][0].y, input_strips[0][0].z, 0, 0};
@@ -251,8 +247,9 @@ int main()
     std::cout << "Computing Path min & max...\n";
 
     // find path limits for each node
+    const PathStepStat pssInit = {fMAX, -fMAX, fMAX, -fMAX, fMAX, -fMAX, fMAX, -fMAX};
     std::fill(node_path_stats.begin(), node_path_stats.end(), pssInit);
-    node_path_stats[0] = {0, 0, 0, 0, 0, 0};
+    node_path_stats[0] = {0,0,0,0,0,0,0,0};
     visit_stack = {0};
     while (!visit_stack.empty())
     {
@@ -262,33 +259,28 @@ int main()
             const PathStepStat& pss_f = node_path_stats[f];
             PathStepStat& pss_t = node_path_stats[t];
             const EdgeInfo& ei = edge_info[{f, t}];
-            pss_t.min_cost = std::min(pss_t.min_cost, pss_f.min_cost + ei.cost);
-            pss_t.max_cost = std::max(pss_t.max_cost, pss_f.max_cost + ei.cost);
-            pss_t.min_len = std::min(pss_t.min_len, pss_f.min_len + ei.len);
-            pss_t.max_len = std::max(pss_t.max_len, pss_f.max_len + ei.len);
-            pss_t.min_hill = std::min(pss_t.min_hill, pss_f.min_hill + ei.hill);
-            pss_t.max_hill = std::max(pss_t.max_hill, pss_f.max_hill + ei.hill);
+            pss_t.cost_min = std::min(pss_t.cost_min, pss_f.cost_min + ei.cost);
+            pss_t.cost_max = std::max(pss_t.cost_max, pss_f.cost_max + ei.cost);
+            pss_t.len_min = std::min(pss_t.len_min, pss_f.len_min + ei.len);
+            pss_t.len_max = std::max(pss_t.len_max, pss_f.len_max + ei.len);
+            pss_t.hill_min = std::min(pss_t.hill_min, pss_f.hill_min + ei.hill);
+            pss_t.hill_max = std::max(pss_t.hill_max, pss_f.hill_max + ei.hill);
             pss_t.min_dp = std::min(pss_t.min_dp, pss_f.min_dp + ei.dp);
             pss_t.max_dp = std::max(pss_t.max_dp, pss_f.max_dp + ei.dp);
             visit_stack.push_back(t);
         });
     }
 
-    // tailor a specialized pressure table for each node
+    std::cout << "Node limits on lengths, hills and pressures:\n";
+
+    std::cout << "0 (0,0) 0 0, 0 0, 0 0\n";
     for(Node t = 1; t < nCount; ++t) // nb: start at 1
     {
-        NodePressureTable& npt = node_pressure_tables[t];
-        const PathStepStat& pss = node_path_stats[t];
-        const float dl = (pss.max_len - pss.min_len) / nptINCR;
-        const float dh = (pss.max_hill - pss.min_hill) / nptINCR;
-        for(int i = 0; i < nptSIZE; ++i)
-        {
-            npt.scale_len[i] = pss.min_len + float(i) * dl;
-            npt.scale_hill[i] = pss.min_hill + float(i) * dh;
-        }
-        for(int i = 0; i < nptSIZE; ++i) // len
-            for(int j = 0; j < nptSIZE; ++j) // hill
-                npt.table[i][j] = pressure_loss.alpha * npt.scale_len[i] + pressure_loss.beta * npt.scale_hill[j];
+        PathStepStat& pss_t = node_path_stats[t];
+        std::cout << t << " (" << node_info[t].strip << ',' << node_info[t].index << ") ";
+        std::cout << pss_t.len_min << ' ' << pss_t.len_max << ", ";
+        std::cout << pss_t.hill_min << ' ' << pss_t.hill_max << ", ";
+        std::cout << pss_t.min_dp << ' ' << pss_t.max_dp << '\n';
     }
 
     std::cout << "Node Path Limits and Linkages:\n";
@@ -301,9 +293,9 @@ int main()
         Node f = visit_stack_pop();
         PathStepStat& pss = node_path_stats[f];
         std::cout << f << " (" << node_info[f].strip << ',' << node_info[f].index << ") ";
-        std::cout << pss.min_cost  << " " << pss.max_cost << " ";
-        std::cout << pss.min_len  << " " << pss.max_len << " ";
-        std::cout << pss.min_hill  << " " << pss.max_hill << " ";
+        std::cout << pss.cost_min << " " << pss.cost_max << " ";
+        std::cout << pss.len_min << " " << pss.len_max << " ";
+        std::cout << pss.hill_min << " " << pss.hill_max << " ";
         std::cout << pss.min_dp  << " " << pss.max_dp << " ";
         if( fwd_linkage[f].size() > 0)
             std::cout << ": ";
@@ -351,9 +343,9 @@ int main()
     {
         std::cout << "\nMinimizing " << title << "\n";
 
-        // forward pass: start at inlet and work towards outlet
-        std::vector<PathStep> fwd_accum(fwd_linkage.size(), psMAX );
-        fwd_accum[0] = {0, 0, 0, 0, 0};
+        // forward pass: start at inlet and work towards outlet to accumulate using the psa()
+        std::vector<PathStep> fwd_accum(fwd_linkage.size(), {nMAX, fMAX, fMAX, fMAX, fMAX} );
+        fwd_accum[0] = {0,0,0,0,0};
         visit_stack = {0};
         std::fill(fwd_visit_marking.begin(), fwd_visit_marking.end(), false);
         while (!visit_stack.empty())
@@ -361,7 +353,7 @@ int main()
             Node f = visit_stack_pop();
             std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
             {
-                PathStep step_accum;
+                PathStep step_accum = {nMAX, fMAX, fMAX, fMAX, fMAX};
                 step_accum.path_node = t; // remember t as on the minimum_path (if selected)
                 step_accum.cost = fwd_accum[f].cost + edge_info[{f, t}].cost;
                 step_accum.len = fwd_accum[f].len + edge_info[{f, t}].len;
@@ -372,13 +364,13 @@ int main()
             });
         }
 
-        // backward pass: start at outlet and work towards inlet following the route of least-remainder
+        // backward pass: start at outlet and work towards inlet following the route of smallest-value psa()
         soln.clear();
         soln.push_front(fwd_accum[nCount - 1]);
         Node t = nCount - 1;
         while (t != 0)
         {
-            PathStep step_min = psMAX;
+            PathStep step_min = {nMAX, fMAX, fMAX, fMAX, fMAX};
             std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
             {
                 if (psa(fwd_accum[f]) < psa(step_min))
@@ -391,7 +383,7 @@ int main()
         print_solution();
     };
 
-    // path step accessors
+    // path-step attribute accessors
     auto psa_cost = [](const PathStep& ps) -> float { return ps.cost; };
     auto psa_length = [](const PathStep& ps) -> float { return ps.len; };
     auto psa_pressureloss = [](const PathStep& ps) -> float { return ps.dp; };
@@ -399,6 +391,98 @@ int main()
     minimize("cost", psa_cost);
     minimize("length", psa_length);
     minimize("pressureloss", psa_pressureloss);
+/* WIP
+    // find the route that results in the desired pressure-loss remainder
+    auto solve_pressure = [&](const float pl_target)
+    {
+        std::cout << "\nSolving for pl_target of " << pl_target << "\n";
 
+        struct State { float v; int len_idx, hill_idx; };
+        State ss = {fMAX, iMAX, iMAX};
+
+        // moving forward, create cumulative pressure-range table for each node
+        std::vector<NodePressureTable> node_pressure_table(nCount);
+        for(Node t = 1; t < nCount; ++t) // nb: start at 1
+        {
+            NodePressureTable& npt = node_pressure_table[t];
+            const PathStepStat& pss = node_path_stats[t];
+            const float dl = (pss.len_max - pss.len_min) / nptINCR;
+            const float dh = (pss.hill_max - pss.hill_min) / nptINCR;
+            for(int i = 0; i < nptSIZE; ++i)
+            {
+                npt.len_scale[i] = pss.len_min + float(i) * dl;
+                npt.hill_scale[i] = pss.hill_min + float(i) * dh;
+            }
+            for(int len_idx = 0; len_idx < nptSIZE; ++len_idx)
+                for(int hill_idx = 0; hill_idx < nptSIZE; ++hill_idx)
+                    npt.table[len_idx][hill_idx] = pressure_loss.alpha * npt.len_scale[len_idx] + pressure_loss.beta * npt.hill_scale[hill_idx];
+        }
+
+        // moving backwards, scan each pl table to find the closest +ve pressure loss to pl_remaining
+        std::deque<Node> bwd_route;
+        float pl_remainder = pl_target;
+        Node t = nCount - 1;
+        bwd_route.push_front(t);
+        while (t != 0)
+        {
+            // find l/h with the closest pressureloss, ensure +ve remainders only
+            State cs = {fMAX, iMAX, iMAX};
+            NodePressureTable& npt = node_pressure_table[t];
+            for(int len_idx = 0; len_idx < nptSIZE; ++len_idx)
+                for(int hill_idx = 0; hill_idx < nptSIZE; ++hill_idx)
+                {
+                    float pl_test = npt.table[len_idx][hill_idx] - pl_remainder;
+                    if (pl_test < cs.v && pl_test >= 0) // to ensure feasibility, pick nearest with +ve excess
+                        cs = {pl_test, len_idx, hill_idx};
+                }
+            assert(cs.len_idx < iMAX);
+            float len_test = npt.len_scale[cs.len_idx];
+            float hill_test = npt.hill_scale[cs.hill_idx];
+
+            // find originating node for that nearest l/h, ensure +ve remainders only
+            std::pair<Node, float> sel = {nMAX, fMAX};
+            std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
+            {
+                const PathStepStat& pss = node_path_stats[f];
+                if (pss.len_min <= len_test)
+                    if (len_test <= pss.len_max)
+                        if (pss.hill_min <= hill_test)
+                            if (hill_test <= pss.hill_max)
+                                sel = {f, 0};
+                if (sel.second > 1E-8)
+                {
+                    std::pair<float, float> centre = {pss.len_max - pss.len_min, pss.hill_max - pss.hill_min};
+                    std::pair<float, float> delta = {centre.first - len_test, centre.second - hill_test};
+                    float dist = sqrtf( delta.first * delta.first + delta.second * delta.second );
+                    if (dist < sel.second)
+                        sel = {f, dist};
+                }
+            });
+            assert(sel.first != nMAX);
+            bwd_route.push_front(sel.first);
+
+            pl_remainder -= edge_info[{sel.first, t}].dp; // reduce the remaining pressure loss
+            t = sel.first; // change to node in previous strip
+        }
+
+        // trace forward to build the cumulative solution from the stored route
+        Node f = 0;
+        PathStep step_accum = {0,0,0,0,0};
+        soln.clear();
+        std::for_each(bwd_route.begin(), bwd_route.end(), [&](Node t)
+        {
+            step_accum.path_node = t; // remember the t-route
+            step_accum.cost += edge_info[{f, t}].cost;
+            step_accum.len += edge_info[{f, t}].len;
+            step_accum.dp += edge_info[{f, t}].dp;
+            soln.push_back(step_accum);
+            f = t;
+        });
+
+        print_solution();
+    };
+
+    solve_pressure(40);
+*/
     return 0;
 }
