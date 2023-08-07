@@ -342,6 +342,7 @@ int main()
     auto minimize = [&](const std::string& title, std::function<float(const PathStep& ps)> psa)
     {
         std::cout << "\nMinimizing " << title << "\n";
+        soln.clear();
 
         // forward pass: start at inlet and work towards outlet to accumulate using the psa()
         std::vector<PathStep> fwd_accum(fwd_linkage.size(), {nMAX, fMAX, fMAX, fMAX, fMAX} );
@@ -365,7 +366,6 @@ int main()
         }
 
         // backward pass: start at outlet and work towards inlet following the route of smallest-value psa()
-        soln.clear();
         soln.push_front(fwd_accum[nCount - 1]);
         Node t = nCount - 1;
         while (t != 0)
@@ -391,11 +391,12 @@ int main()
     minimize("cost", psa_cost);
     minimize("length", psa_length);
     minimize("pressureloss", psa_pressureloss);
-/* WIP
+
     // find the route that results in the desired pressure-loss remainder
     auto solve_pressure = [&](const float pl_target)
     {
         std::cout << "\nSolving for pl_target of " << pl_target << "\n";
+        soln.clear();
 
         struct State { float v; int len_idx, hill_idx; };
         State ss = {fMAX, iMAX, iMAX};
@@ -406,8 +407,10 @@ int main()
         {
             NodePressureTable& npt = node_pressure_table[t];
             const PathStepStat& pss = node_path_stats[t];
-            const float dl = (pss.len_max - pss.len_min) / nptINCR;
-            const float dh = (pss.hill_max - pss.hill_min) / nptINCR;
+
+            // use std::nextafter() to add one iota so the segment is enlarged
+            const float dl = std::nextafter((pss.len_max - pss.len_min) / nptINCR, fMAX);
+            const float dh = std::nextafter((pss.hill_max - pss.hill_min) / nptINCR, fMAX);
             for(int i = 0; i < nptSIZE; ++i)
             {
                 npt.len_scale[i] = pss.len_min + float(i) * dl;
@@ -425,55 +428,65 @@ int main()
         bwd_route.push_front(t);
         while (t != 0)
         {
-            // find l/h with the closest pressureloss, ensure +ve remainders only
+            // find l/h with the closest pressureloss
             State cs = {fMAX, iMAX, iMAX};
             NodePressureTable& npt = node_pressure_table[t];
             for(int len_idx = 0; len_idx < nptSIZE; ++len_idx)
                 for(int hill_idx = 0; hill_idx < nptSIZE; ++hill_idx)
                 {
-                    float pl_test = npt.table[len_idx][hill_idx] - pl_remainder;
-                    if (pl_test < cs.v && pl_test >= 0) // to ensure feasibility, pick nearest with +ve excess
+                    float pl_test = pl_remainder - npt.table[len_idx][hill_idx];
+                    if (fabs(pl_test) < fabs(cs.v)) // pick nearest
                         cs = {pl_test, len_idx, hill_idx};
                 }
             assert(cs.len_idx < iMAX);
-            float len_test = npt.len_scale[cs.len_idx];
-            float hill_test = npt.hill_scale[cs.hill_idx];
+            float len_remainder = npt.len_scale[cs.len_idx];
+            float hill_remainder = npt.hill_scale[cs.hill_idx];
 
-            // find originating node for that nearest l/h, ensure +ve remainders only
-            std::pair<Node, float> sel = {nMAX, fMAX};
+            // find originating node for that nearest l/h
+            Node sel_node = nMAX;
+            std::pair<float, float> sel_delta(fMAX, fMAX);
             std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
             {
                 const PathStepStat& pss = node_path_stats[f];
-                if (pss.len_min <= len_test)
-                    if (len_test <= pss.len_max)
-                        if (pss.hill_min <= hill_test)
-                            if (hill_test <= pss.hill_max)
-                                sel = {f, 0};
-                if (sel.second > 1E-8)
-                {
-                    std::pair<float, float> centre = {pss.len_max - pss.len_min, pss.hill_max - pss.hill_min};
-                    std::pair<float, float> delta = {centre.first - len_test, centre.second - hill_test};
-                    float dist = sqrtf( delta.first * delta.first + delta.second * delta.second );
-                    if (dist < sel.second)
-                        sel = {f, dist};
-                }
-            });
-            assert(sel.first != nMAX);
-            bwd_route.push_front(sel.first);
 
-            pl_remainder -= edge_info[{sel.first, t}].dp; // reduce the remaining pressure loss
-            t = sel.first; // change to node in previous strip
+                const float len_test = len_remainder - edge_info[{f, t}].len;
+                const float hill_test = hill_remainder - edge_info[{f, t}].hill;
+
+                const std::pair<float, float> centre = {(pss.len_max - pss.len_min)/2, (pss.hill_max - pss.hill_min)/2};
+                const std::pair<float, float> delta = {centre.first - len_test, centre.second - hill_test};
+
+                if (pss.len_min > len_test) return;
+                if (len_test > pss.len_max) return;
+                if (delta.first >= sel_delta.first) return;
+                sel_node = f;
+                sel_delta = delta;
+
+                if (pss.hill_min > hill_test) return;
+                if (hill_test > pss.hill_max) return;
+                if (delta.second >= sel_delta.second) return;
+                sel_node = f;
+                sel_delta = delta;
+            });
+            if (sel_node == nMAX)
+            {
+                std::cout << "Infeasible\n";
+                return;
+            }
+            bwd_route.push_front(sel_node);
+
+            pl_remainder -= edge_info[{sel_node, t}].dp; // reduce the remaining pressure loss
+            t = sel_node; // change to node in previous strip
         }
 
         // trace forward to build the cumulative solution from the stored route
         Node f = 0;
         PathStep step_accum = {0,0,0,0,0};
-        soln.clear();
         std::for_each(bwd_route.begin(), bwd_route.end(), [&](Node t)
         {
             step_accum.path_node = t; // remember the t-route
             step_accum.cost += edge_info[{f, t}].cost;
             step_accum.len += edge_info[{f, t}].len;
+            step_accum.hill += edge_info[{f, t}].hill;
             step_accum.dp += edge_info[{f, t}].dp;
             soln.push_back(step_accum);
             f = t;
@@ -482,7 +495,12 @@ int main()
         print_solution();
     };
 
+    solve_pressure(38);
+    solve_pressure(39);
     solve_pressure(40);
-*/
+    solve_pressure(41);
+    solve_pressure(42);
+    solve_pressure(43);
+
     return 0;
 }
