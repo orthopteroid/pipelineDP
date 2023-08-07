@@ -421,6 +421,44 @@ int main()
                     npt.table[len_idx][hill_idx] = pressure_loss.alpha * npt.len_scale[len_idx] + pressure_loss.beta * npt.hill_scale[hill_idx];
         }
 
+#if false
+        // moving backwards, scan each pl table to find the closest +ve pressure loss to pl_remaining
+        std::deque<Node> bwd_route;
+        float pl_remainder = pl_target;
+        Node t = nCount - 1;
+        bwd_route.push_front(t);
+        bool route_is_best_guess = false;
+        while (t != 0)
+        {
+            // find node with the closest remaining pressureloss
+            std::pair<Node, float> sel(nMAX, fMAX);
+            std::pair<Node, float> sel_alwaysfeasible(nMAX, fMAX);
+            std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
+            {
+                const PathStepStat& pss = node_path_stats[f];
+                const float pl_test = pl_remainder - edge_info[{f, t}].dp;
+
+                if (sel_alwaysfeasible.second < fMAX)
+                {
+                    if (pl_test < pss.min_dp) return;
+                    if (pss.max_dp > pl_test) return;
+                }
+                sel_alwaysfeasible = {f, pl_test};
+
+                if (pl_test < pss.min_dp) return;
+                if (pss.max_dp > pl_test) return;
+                sel = {f, pl_test};
+            });
+            bwd_route.push_front(sel_alwaysfeasible.first);
+            if (sel.first == nMAX)
+                route_is_best_guess = true;
+
+            pl_remainder -= edge_info[{sel_alwaysfeasible.first, t}].dp; // reduce the remaining pressure loss
+            t = sel_alwaysfeasible.first; // change to node in previous strip
+        }
+        if (route_is_best_guess)
+            std::cout << "Infeasible. Approximate solution attempted.\n";
+#else
         // moving backwards, scan each pl table to find the closest +ve pressure loss to pl_remaining
         std::deque<Node> bwd_route;
         float pl_remainder = pl_target;
@@ -477,7 +515,7 @@ int main()
             pl_remainder -= edge_info[{sel_node, t}].dp; // reduce the remaining pressure loss
             t = sel_node; // change to node in previous strip
         }
-
+#endif
         // trace forward to build the cumulative solution from the stored route
         Node f = 0;
         PathStep step_accum = {0,0,0,0,0};
