@@ -383,19 +383,25 @@ int main()
     minimize("length", psa_length);
     minimize("pressureloss", psa_pressureloss);
 
-    // forward pass: start at inlet and summarize feasible accum pl towards outlet
     const uint16_t solution_tol = 10; // tenths etc. exponentially increases running time.
-    std::vector< std::set<uint16_t> > fwd_feasible(nCount);
-    fwd_feasible[0].insert(0);
+
+    // forward pass: start at inlet and summarize feasible accum pl towards outlet, track lowest cost of path
+    std::vector< std::map<const uint16_t, float> > fwd_feasible(nCount); // pressure, cost
+    fwd_feasible[0][0] = 0;
     visit_stack = {0};
     while (!visit_stack.empty())
     {
         Node f = visit_stack_pop();
-        for(const Node &t: fwd_linkage[f])
+        for (const Node &t: fwd_linkage[f])
         {
-            for(const uint16_t &v: fwd_feasible[f])
+            for (const auto &[f_p, f_c]: fwd_feasible[f])
             {
-                fwd_feasible[t].insert(v + uint16_t(floorf(edge_info[{f, t}].dp * solution_tol)));
+                const uint16_t p = f_p + uint16_t(floorf(edge_info[{f, t}].dp * solution_tol));
+                const float c = f_c + edge_info[{f, t}].cost;
+                auto &map = fwd_feasible[t];
+                auto item = map.find(p);
+                if (item == map.end() || c < item->second)
+                    map.insert({p, c});
             };
             visit_stack.push_back(t);
         };
@@ -404,7 +410,7 @@ int main()
     // find the route that results in the desired pressure-loss remainder
     auto solve_pressure = [&](const float pl_target)
     {
-        std::cout << "\nSolving for pressureloss of " << pl_target << "\n";
+        std::cout << "\nSolving for pressureloss of " << pl_target << " while minimizing cost\n";
         soln.clear();
 
         // moving backwards, scan each pl table of incoming nodes to find the closest pressure loss to pl_remaining
@@ -414,29 +420,32 @@ int main()
         bwd_route.push_front(t);
         while (t != 0)
         {
-            std::pair<Node, float> sel = {nMAX, fMAX};
-            for(const Node &f: bwd_linkage[t])
+            std::tuple<Node, float, float> sel = {nMAX, fMAX, fMAX}; // node, pressure, cost
+            for (const Node &f: bwd_linkage[t])
             {
-                for(const uint16_t &v: fwd_feasible[f])
+                for (const auto &[f_p, f_c]: fwd_feasible[f])
                 {
-                    const float pl_test = float(v) / float(solution_tol) + edge_info[{f, t}].dp;
-                    if(sel.first == nMAX)
-                        sel = {f, pl_test};
-                    else if (fabsf(pl_remainder - pl_test) < fabsf(pl_remainder - sel.second))
-                        sel = {f, pl_test};
+                    const float pl_test = float(f_p) / float(solution_tol) + edge_info[{f, t}].dp;
+                    if (std::get<0>(sel) == nMAX)
+                        sel = {f, pl_test, f_c};
+                    else
+                        if (fabsf(pl_remainder - pl_test) < fabsf(pl_remainder - std::get<1>(sel)))
+                            if (f_c < std::get<2>(sel))
+                                sel = {f, pl_test, f_c};
                 };
             };
-            assert(sel.first != nMAX);
+            Node f = std::get<0>(sel);
+            assert(f != nMAX);
 
-            bwd_route.push_front(sel.first);
-            pl_remainder -= edge_info[{sel.first, t}].dp; // reduce the remaining pressure loss
-            t = sel.first;
+            bwd_route.push_front(f);
+            pl_remainder -= edge_info[{f, t}].dp; // reduce the remaining pressure loss
+            t = f;
         }
 
         // trace forward to build the cumulative solution from the stored route
         Node f = 0;
         PathStep step_accum = {0,0,0,0,0};
-        for(const Node &t: bwd_route)
+        for (const Node &t: bwd_route)
         {
             step_accum.path_node = t; // remember the t-route
             step_accum.cost += edge_info[{f, t}].cost;
