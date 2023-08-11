@@ -9,6 +9,7 @@
 #include <limits>
 #include <valarray>
 #include <cassert>
+#include <set>
 
 using Node = uint16_t;
 using Edge = std::pair<Node, Node>;
@@ -21,16 +22,6 @@ struct PathStep { Node path_node; float cost, len, hill, dp; };
 struct PathStepStat { float cost_min, cost_max, len_min, len_max, hill_min, hill_max, min_dp, max_dp; };
 
 using InputStrip = std::vector<StripInfo>;
-
-const int nptINCR = 10;
-const int nptSIZE = nptINCR +1;
-
-// used to dimension a node's L vs H pressure curves
-struct NodePressureTable {
-    float len_scale[nptSIZE];
-    float hill_scale[nptSIZE];
-    float table[nptSIZE /* len */ ][nptSIZE /* hill */ ];
-};
 
 const float fMAX = std::numeric_limits<float>::max();
 const int iMAX = std::numeric_limits<int>::max();
@@ -392,130 +383,57 @@ int main()
     minimize("length", psa_length);
     minimize("pressureloss", psa_pressureloss);
 
+    // forward pass: start at inlet and summarize feasible accum pl towards outlet
+    const uint16_t solution_tol = 10; // tenths etc. exponentially increases running time.
+    std::vector< std::set<uint16_t> > fwd_feasible(nCount);
+    fwd_feasible[0].insert(0);
+    visit_stack = {0};
+    while (!visit_stack.empty())
+    {
+        Node f = visit_stack_pop();
+        std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
+        {
+            std::for_each(fwd_feasible[f].begin(), fwd_feasible[f].end(), [&](uint16_t v)
+            {
+                fwd_feasible[t].insert(v + uint16_t(floorf(edge_info[{f, t}].dp * solution_tol)));
+            });
+
+            visit_stack.push_back(t);
+        });
+    }
+
     // find the route that results in the desired pressure-loss remainder
     auto solve_pressure = [&](const float pl_target)
     {
-        std::cout << "\nSolving for pl_target of " << pl_target << "\n";
+        std::cout << "\nSolving for pressureloss of " << pl_target << "\n";
         soln.clear();
 
-        struct State { float v; int len_idx, hill_idx; };
-        State ss = {fMAX, iMAX, iMAX};
-
-        // moving forward, create cumulative pressure-range table for each node
-        std::vector<NodePressureTable> node_pressure_table(nCount);
-        for(Node t = 1; t < nCount; ++t) // nb: start at 1
-        {
-            NodePressureTable& npt = node_pressure_table[t];
-            const PathStepStat& pss = node_path_stats[t];
-
-            // use std::nextafter() to add one iota so the segment is enlarged
-            const float dl = std::nextafter((pss.len_max - pss.len_min) / nptINCR, fMAX);
-            const float dh = std::nextafter((pss.hill_max - pss.hill_min) / nptINCR, fMAX);
-            for(int i = 0; i < nptSIZE; ++i)
-            {
-                npt.len_scale[i] = pss.len_min + float(i) * dl;
-                npt.hill_scale[i] = pss.hill_min + float(i) * dh;
-            }
-            for(int len_idx = 0; len_idx < nptSIZE; ++len_idx)
-                for(int hill_idx = 0; hill_idx < nptSIZE; ++hill_idx)
-                    npt.table[len_idx][hill_idx] = pressure_loss.alpha * npt.len_scale[len_idx] + pressure_loss.beta * npt.hill_scale[hill_idx];
-        }
-
-#if false
-        // moving backwards, scan each pl table to find the closest +ve pressure loss to pl_remaining
-        std::deque<Node> bwd_route;
-        float pl_remainder = pl_target;
-        Node t = nCount - 1;
-        bwd_route.push_front(t);
-        bool route_is_best_guess = false;
-        while (t != 0)
-        {
-            // find node with the closest remaining pressureloss
-            std::pair<Node, float> sel(nMAX, fMAX);
-            std::pair<Node, float> sel_alwaysfeasible(nMAX, fMAX);
-            std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
-            {
-                const PathStepStat& pss = node_path_stats[f];
-                const float pl_test = pl_remainder - edge_info[{f, t}].dp;
-
-                if (sel_alwaysfeasible.second < fMAX)
-                {
-                    if (pl_test < pss.min_dp) return;
-                    if (pss.max_dp > pl_test) return;
-                }
-                sel_alwaysfeasible = {f, pl_test};
-
-                if (pl_test < pss.min_dp) return;
-                if (pss.max_dp > pl_test) return;
-                sel = {f, pl_test};
-            });
-            bwd_route.push_front(sel_alwaysfeasible.first);
-            if (sel.first == nMAX)
-                route_is_best_guess = true;
-
-            pl_remainder -= edge_info[{sel_alwaysfeasible.first, t}].dp; // reduce the remaining pressure loss
-            t = sel_alwaysfeasible.first; // change to node in previous strip
-        }
-        if (route_is_best_guess)
-            std::cout << "Infeasible. Approximate solution attempted.\n";
-#else
-        // moving backwards, scan each pl table to find the closest +ve pressure loss to pl_remaining
+        // moving backwards, scan each pl table of incoming nodes to find the closest pressure loss to pl_remaining
         std::deque<Node> bwd_route;
         float pl_remainder = pl_target;
         Node t = nCount - 1;
         bwd_route.push_front(t);
         while (t != 0)
         {
-            // find l/h with the closest pressureloss
-            State cs = {fMAX, iMAX, iMAX};
-            NodePressureTable& npt = node_pressure_table[t];
-            for(int len_idx = 0; len_idx < nptSIZE; ++len_idx)
-                for(int hill_idx = 0; hill_idx < nptSIZE; ++hill_idx)
-                {
-                    float pl_test = pl_remainder - npt.table[len_idx][hill_idx];
-                    if (fabs(pl_test) < fabs(cs.v)) // pick nearest
-                        cs = {pl_test, len_idx, hill_idx};
-                }
-            assert(cs.len_idx < iMAX);
-            float len_remainder = npt.len_scale[cs.len_idx];
-            float hill_remainder = npt.hill_scale[cs.hill_idx];
-
-            // find originating node for that nearest l/h
-            Node sel_node = nMAX;
-            std::pair<float, float> sel_delta(fMAX, fMAX);
+            std::pair<Node, float> sel = {nMAX, fMAX};
             std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
             {
-                const PathStepStat& pss = node_path_stats[f];
-
-                const float len_test = len_remainder - edge_info[{f, t}].len;
-                const float hill_test = hill_remainder - edge_info[{f, t}].hill;
-
-                const std::pair<float, float> centre = {(pss.len_max - pss.len_min)/2, (pss.hill_max - pss.hill_min)/2};
-                const std::pair<float, float> delta = {centre.first - len_test, centre.second - hill_test};
-
-                if (pss.len_min > len_test) return;
-                if (len_test > pss.len_max) return;
-                if (delta.first >= sel_delta.first) return;
-                sel_node = f;
-                sel_delta = delta;
-
-                if (pss.hill_min > hill_test) return;
-                if (hill_test > pss.hill_max) return;
-                if (delta.second >= sel_delta.second) return;
-                sel_node = f;
-                sel_delta = delta;
+                std::for_each(fwd_feasible[f].begin(), fwd_feasible[f].end(), [&](uint16_t v)
+                {
+                    const float pl_test = float(v) / float(solution_tol) + edge_info[{f, t}].dp;
+                    if(sel.first == nMAX)
+                        sel = {f, pl_test};
+                    else if (fabsf(pl_remainder - pl_test) < fabsf(pl_remainder - sel.second))
+                        sel = {f, pl_test};
+                });
             });
-            if (sel_node == nMAX)
-            {
-                std::cout << "Infeasible\n";
-                return;
-            }
-            bwd_route.push_front(sel_node);
+            assert(sel.first != nMAX);
 
-            pl_remainder -= edge_info[{sel_node, t}].dp; // reduce the remaining pressure loss
-            t = sel_node; // change to node in previous strip
+            bwd_route.push_front(sel.first);
+            pl_remainder -= edge_info[{sel.first, t}].dp; // reduce the remaining pressure loss
+            t = sel.first;
         }
-#endif
+
         // trace forward to build the cumulative solution from the stored route
         Node f = 0;
         PathStep step_accum = {0,0,0,0,0};
