@@ -245,7 +245,7 @@ int main()
     while (!visit_stack.empty())
     {
         Node f = visit_stack_pop();
-        std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
+        for(const Node &t: fwd_linkage[f])
         {
             const PathStepStat& pss_f = node_path_stats[f];
             PathStepStat& pss_t = node_path_stats[t];
@@ -259,7 +259,7 @@ int main()
             pss_t.min_dp = std::min(pss_t.min_dp, pss_f.min_dp + ei.dp);
             pss_t.max_dp = std::max(pss_t.max_dp, pss_f.max_dp + ei.dp);
             visit_stack.push_back(t);
-        });
+        };
     }
 
     std::cout << "Node limits on lengths, hills and pressures:\n";
@@ -290,12 +290,12 @@ int main()
         std::cout << pss.min_dp  << " " << pss.max_dp << " ";
         if( fwd_linkage[f].size() > 0)
             std::cout << ": ";
-        std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
+        for(const Node &t : fwd_linkage[f])
         {
             auto ei = edge_info[{f, t}];
             std::cout << "(" << t << " " << ei.cost << " " << ei.len << " " << ei.hill << " " << ei.dp << ") ";
             visit_stack_unique_visitation(t);
-        });
+        };
         std::cout << "\n";
     }
 
@@ -310,23 +310,23 @@ int main()
             soln[i].hill = elev_gain(soln[i - 1].hill, soln[i - 1].path_node, soln[i].path_node);
 
         std::cout << "Route (nodes): ";
-        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
-        { std::cout << ps.path_node << ' '; });
+        for(const PathStep &ps: soln)
+        { std::cout << ps.path_node << ' '; };
         std::cout << "\nRoute (strip,index): ";
-        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
-        { std::cout << "(" << node_info[ps.path_node].strip << "," << node_info[ps.path_node].index << ") "; });
+        for(const PathStep &ps: soln)
+        { std::cout << "(" << node_info[ps.path_node].strip << "," << node_info[ps.path_node].index << ") "; };
         std::cout << "\nCumulative cost: ";
-        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
-        { std::cout << ps.cost << ' '; });
+        for(const PathStep &ps: soln)
+        { std::cout << ps.cost << ' '; };
         std::cout << "\nCumulative length: ";
-        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
-        { std::cout << ps.len << ' '; });
+        for(const PathStep &ps: soln)
+        { std::cout << ps.len << ' '; };
         std::cout << "\nCumulative hills: ";
-        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
-        { std::cout << ps.hill << ' '; });
+        for(const PathStep &ps: soln)
+        { std::cout << ps.hill << ' '; };
         std::cout << "\nCumulative pressureloss: ";
-        std::for_each(soln.begin(), soln.end(), [&](PathStep &ps)
-        { std::cout << ps.dp << ' '; });
+        for(const PathStep &ps: soln)
+        { std::cout << ps.dp << ' '; };
         std::cout << "\n";
     };
 
@@ -343,7 +343,7 @@ int main()
         while (!visit_stack.empty())
         {
             Node f = visit_stack_pop();
-            std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
+            for(const Node &t: fwd_linkage[f])
             {
                 PathStep step_accum = {nMAX, fMAX, fMAX, fMAX, fMAX};
                 step_accum.path_node = t; // remember t as on the minimum_path (if selected)
@@ -353,7 +353,7 @@ int main()
                 if (psa(step_accum) < psa(fwd_accum[t]))
                     fwd_accum[t] = step_accum;
                 visit_stack.push_back(t);
-            });
+            };
         }
 
         // backward pass: start at outlet and work towards inlet following the route of smallest-value psa()
@@ -362,11 +362,11 @@ int main()
         while (t != 0)
         {
             PathStep step_min = {nMAX, fMAX, fMAX, fMAX, fMAX};
-            std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
+            for(const Node &f: bwd_linkage[t])
             {
                 if (psa(fwd_accum[f]) < psa(step_min))
                     step_min = fwd_accum[f];
-            });
+            };
             soln.push_front(step_min);
             t = step_min.path_node; // change to node in previous strip (node f)
         }
@@ -391,15 +391,14 @@ int main()
     while (!visit_stack.empty())
     {
         Node f = visit_stack_pop();
-        std::for_each(fwd_linkage[f].begin(), fwd_linkage[f].end(), [&](Node t)
+        for(const Node &t: fwd_linkage[f])
         {
-            std::for_each(fwd_feasible[f].begin(), fwd_feasible[f].end(), [&](uint16_t v)
+            for(const uint16_t &v: fwd_feasible[f])
             {
                 fwd_feasible[t].insert(v + uint16_t(floorf(edge_info[{f, t}].dp * solution_tol)));
-            });
-
+            };
             visit_stack.push_back(t);
-        });
+        };
     }
 
     // find the route that results in the desired pressure-loss remainder
@@ -416,17 +415,17 @@ int main()
         while (t != 0)
         {
             std::pair<Node, float> sel = {nMAX, fMAX};
-            std::for_each(bwd_linkage[t].begin(), bwd_linkage[t].end(), [&](Node f)
+            for(const Node &f: bwd_linkage[t])
             {
-                std::for_each(fwd_feasible[f].begin(), fwd_feasible[f].end(), [&](uint16_t v)
+                for(const uint16_t &v: fwd_feasible[f])
                 {
                     const float pl_test = float(v) / float(solution_tol) + edge_info[{f, t}].dp;
                     if(sel.first == nMAX)
                         sel = {f, pl_test};
                     else if (fabsf(pl_remainder - pl_test) < fabsf(pl_remainder - sel.second))
                         sel = {f, pl_test};
-                });
-            });
+                };
+            };
             assert(sel.first != nMAX);
 
             bwd_route.push_front(sel.first);
@@ -437,7 +436,7 @@ int main()
         // trace forward to build the cumulative solution from the stored route
         Node f = 0;
         PathStep step_accum = {0,0,0,0,0};
-        std::for_each(bwd_route.begin(), bwd_route.end(), [&](Node t)
+        for(const Node &t: bwd_route)
         {
             step_accum.path_node = t; // remember the t-route
             step_accum.cost += edge_info[{f, t}].cost;
@@ -446,7 +445,7 @@ int main()
             step_accum.dp += edge_info[{f, t}].dp;
             soln.push_back(step_accum);
             f = t;
-        });
+        };
 
         print_solution();
     };
