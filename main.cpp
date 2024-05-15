@@ -415,10 +415,9 @@ int main()
 
         // moving backwards, scan each pl table of incoming nodes to find the closest pressure loss to pl_remaining
         std::deque<Node> bwd_route;
+        bwd_route.push_front(nCount - 1);
         float pl_remainder = pl_target;
-        Node t = nCount - 1;
-        bwd_route.push_front(t);
-        while (t != 0)
+        for(Node f, t = nCount - 1; t != 0; t = f)
         {
             std::tuple<Node, float, float> sel = {nMAX, fMAX, fMAX}; // node, pressure, cost
             for (const Node &f: bwd_linkage[t])
@@ -432,20 +431,19 @@ int main()
                         if (fabsf(pl_remainder - pl_test) < fabsf(pl_remainder - std::get<1>(sel)))
                             if (f_c < std::get<2>(sel))
                                 sel = {f, pl_test, f_c};
-            Node f = std::get<0>(sel);
                 }
             }
+            f = std::get<0>(sel);
             assert(f != nMAX);
 
             bwd_route.push_front(f);
             pl_remainder -= edge_info[{f, t}].dp; // reduce the remaining pressure loss
-            t = f;
         }
 
         // trace forward to build the cumulative solution from the stored route
-        Node f = 0;
+
         PathStep step_accum = {0,0,0,0,0};
-        for (const Node &t: bwd_route)
+        for (Node f = 0; const Node &t: bwd_route)
         {
             step_accum.path_node = t; // remember the t-route
             step_accum.cost += edge_info[{f, t}].cost;
