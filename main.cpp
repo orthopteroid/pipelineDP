@@ -417,7 +417,7 @@ int main()
         std::deque<Node> bwd_route;
         bwd_route.push_front(nCount - 1);
         float pl_remainder = pl_target;
-        for(Node f, t = nCount - 1; t != 0; t = f)
+        for(Node f_outer, t = nCount - 1; t != 0; t = f_outer)
         {
             std::tuple<Node, float, float> sel = {nMAX, fMAX, fMAX}; // node, pressure, cost
             for (const Node &f: bwd_linkage[t])
@@ -433,11 +433,11 @@ int main()
                                 sel = {f, pl_test, f_c};
                 }
             }
-            f = std::get<0>(sel);
-            assert(f != nMAX);
+            f_outer = std::get<0>(sel);
+            assert(f_outer != nMAX);
 
-            bwd_route.push_front(f);
-            pl_remainder -= edge_info[{f, t}].dp; // reduce the remaining pressure loss
+            bwd_route.push_front(f_outer);
+            pl_remainder -= edge_info[{f_outer, t}].dp; // reduce the remaining pressure loss
         }
 
         // trace forward to build the cumulative solution from the stored route
