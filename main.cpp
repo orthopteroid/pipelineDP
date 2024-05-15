@@ -259,7 +259,7 @@ int main()
             pss_t.min_dp = std::min(pss_t.min_dp, pss_f.min_dp + ei.dp);
             pss_t.max_dp = std::max(pss_t.max_dp, pss_f.max_dp + ei.dp);
             visit_stack.push_back(t);
-        };
+        }
     }
 
     std::cout << "Node limits on lengths, hills and pressures:\n";
@@ -295,7 +295,7 @@ int main()
             auto ei = edge_info[{f, t}];
             std::cout << "(" << t << " " << ei.cost << " " << ei.len << " " << ei.hill << " " << ei.dp << ") ";
             visit_stack_unique_visitation(t);
-        };
+        }
         std::cout << "\n";
     }
 
@@ -311,22 +311,22 @@ int main()
 
         std::cout << "Route (nodes): ";
         for(const PathStep &ps: soln)
-        { std::cout << ps.path_node << ' '; };
+        { std::cout << ps.path_node << ' '; }
         std::cout << "\nRoute (strip,index): ";
         for(const PathStep &ps: soln)
-        { std::cout << "(" << node_info[ps.path_node].strip << "," << node_info[ps.path_node].index << ") "; };
+        { std::cout << "(" << node_info[ps.path_node].strip << "," << node_info[ps.path_node].index << ") "; }
         std::cout << "\nCumulative cost: ";
         for(const PathStep &ps: soln)
-        { std::cout << ps.cost << ' '; };
+        { std::cout << ps.cost << ' '; }
         std::cout << "\nCumulative length: ";
         for(const PathStep &ps: soln)
-        { std::cout << ps.len << ' '; };
+        { std::cout << ps.len << ' '; }
         std::cout << "\nCumulative hills: ";
         for(const PathStep &ps: soln)
-        { std::cout << ps.hill << ' '; };
+        { std::cout << ps.hill << ' '; }
         std::cout << "\nCumulative pressureloss: ";
         for(const PathStep &ps: soln)
-        { std::cout << ps.dp << ' '; };
+        { std::cout << ps.dp << ' '; }
         std::cout << "\n";
     };
 
@@ -353,7 +353,7 @@ int main()
                 if (psa(step_accum) < psa(fwd_accum[t]))
                     fwd_accum[t] = step_accum;
                 visit_stack.push_back(t);
-            };
+            }
         }
 
         // backward pass: start at outlet and work towards inlet following the route of smallest-value psa()
@@ -366,7 +366,7 @@ int main()
             {
                 if (psa(fwd_accum[f]) < psa(step_min))
                     step_min = fwd_accum[f];
-            };
+            }
             soln.push_front(step_min);
             t = step_min.path_node; // change to node in previous strip (node f)
         }
@@ -402,9 +402,9 @@ int main()
                 auto item = map.find(p);
                 if (item == map.end() || c < item->second)
                     map.insert({p, c});
-            };
+            }
             visit_stack.push_back(t);
-        };
+        }
     }
 
     // find the route that results in the desired pressure-loss remainder
@@ -432,9 +432,9 @@ int main()
                         if (fabsf(pl_remainder - pl_test) < fabsf(pl_remainder - std::get<1>(sel)))
                             if (f_c < std::get<2>(sel))
                                 sel = {f, pl_test, f_c};
-                };
-            };
             Node f = std::get<0>(sel);
+                }
+            }
             assert(f != nMAX);
 
             bwd_route.push_front(f);
@@ -454,7 +454,7 @@ int main()
             step_accum.dp += edge_info[{f, t}].dp;
             soln.push_back(step_accum);
             f = t;
-        };
+        }
 
         print_solution();
     };
